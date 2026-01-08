@@ -1,0 +1,32 @@
+[project]
+name = "tendermod"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "jhon5530",email = "36444655+jhon5530@users.noreply.github.com"}
+]
+readme = "README.md"
+requires-python = ">=3.12,<4.0"
+dependencies = [
+    "langchain (>=0.3.27,<0.4.0)",
+    "langchain-community (>=0.3.27,<0.4.0)",
+    "chromadb (>=1.0.15,<2.0.0)",
+    "pymupdf (>=1.26.3,<2.0.0)",
+    "tiktoken (>=0.9.0,<0.10.0)",
+    "ragas (>=0.3.0,<0.4.0)",
+    "datasets (>=4.0.0,<5.0.0)",
+    "evaluate (>=0.4.5,<0.5.0)"
+]
+
+[tool.poetry]
+packages = [{include = "tendermod", from = "src"}]
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0.2"
+black = "^25.12.0"
+isort = "^7.0.0"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
