@@ -33,3 +33,5 @@ def build_company_sql_agent():
         agent_type="openai-tools",
         verbose=True
     )
+
+    db_response = db_agent.run(f"valor de indice de endeudamiento")
