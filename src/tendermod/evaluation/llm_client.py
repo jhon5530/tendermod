@@ -1,6 +1,7 @@
 from openai import OpenAI
+from dotenv import load_dotenv
 
-
+load_dotenv()
 def run_llm_indices(system_message, user_message, max_tokens=500, temperature=0.3, top_p=0.95):
     client = OpenAI()
 

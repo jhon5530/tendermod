@@ -12,7 +12,7 @@ def ingest_documents():
 
     # Embeddings and vectorStore
     vectorStore = create_vectorstore(chunks, embed_docs())
-    vectorStore.persist()
+    #vectorStore.persist()
     
     return vectorStore 
     

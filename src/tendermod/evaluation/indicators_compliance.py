@@ -23,7 +23,7 @@ def evaluate_indicators_compliance(user_input: str, k) -> MultipleIndicatorRespo
     #vectorStore = create_vectorstore(chunks, embed_docs())
     vectorStore = read_vectorstore(embed_docs())
 
-    retriever = create_retriever(vectorStore)
+    retriever = create_retriever(vectorStore, k)
     #print(f"\n --- --- --- --- El vector store tiene {vectorStore._collection.count()} registros")
 
     # Evaluation

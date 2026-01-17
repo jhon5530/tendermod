@@ -2,12 +2,12 @@
 
 
 
-def create_retriever(vectorstore):
+def create_retriever(vectorstore, k):
     
     retriever = vectorstore.as_retriever(
         search_type="mmr",
         search_kwargs={
-            "k": 5,
+            "k": k,
             "fetch_k": 15,
             "lambda_mult": 0.6
         }                                                 # Retrieve top 5 most relevant documents

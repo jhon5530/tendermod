@@ -8,9 +8,15 @@ from tendermod.evaluation.indicators_compliance import evaluate_indicators_compl
 from tendermod.config.settings import CHROMA_PERSIST_DIR
 from pathlib import Path
 import shutil
+from dotenv import load_dotenv
+
+
+
+
 
 
 def main():
+    load_dotenv()
     print("\ntendermod running")
 
     #test_openai()

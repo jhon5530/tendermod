@@ -1,7 +1,8 @@
 from tendermod.config.settings import CHROMA_PERSIST_DIR
-from langchain.vectorstores import Chroma
+from langchain_chroma import Chroma
 import shutil
 from pathlib import Path
+from dotenv import load_dotenv
 
 
 
