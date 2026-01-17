@@ -1,6 +1,9 @@
 from langchain_community.document_loaders import PyMuPDFLoader
 from openai import OpenAI
 from tendermod.config.settings import OPENAI_API_KEY
+
+from tendermod.data_sources.redneet_db.sql_agent import build_company_sql_agent
+from tendermod.data_sources.redneet_db.xls_loader import load_db
 from tendermod.ingestion.ingestion_flow import ingest_documents
 from tendermod.ingestion.pdf_loader import load_docs
 from tendermod.ingestion.chunking import chunk_docs
@@ -12,9 +15,6 @@ from dotenv import load_dotenv
 
 
 
-
-
-
 def main():
     load_dotenv()
     print("\ntendermod running")
@@ -22,10 +22,14 @@ def main():
     #test_openai()
 
     ### Enable only to ingest
-    ingest_documents()
+    #ingest_documents()
 
     ###Enable only to consult
-    indicators_routine()
+    #indicators_routine()
+    
+    ###
+    #load_db()
+    build_company_sql_agent()
 
 
 def indicators_routine():

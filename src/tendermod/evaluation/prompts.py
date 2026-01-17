@@ -14,7 +14,7 @@ When crafting your response
 -Use only the provided context to answer the question.
 -If the answer is found in the context, respond with concise and insight-focused summaries.
 -If the question is unrelated to the context or the context is empty, clearly respond with: "Sorry, this is out of my knowledge base."
--All numeric values MUST be valid JSON numbers. Do NOT use thousand separators. Use a single dot (.) as decimal separator. Example: 307313925.5
+
 
 
 Please adhere to the following response guidelines:
@@ -34,6 +34,8 @@ Return the result ONLY as JSON matching this exact schema:
   ]
 }
 """
+# Other ideas
+"-All numeric values MUST be valid JSON numbers. Do NOT use thousand separators. Use a single dot (.) as decimal separator. Example: 307313925.5"
 
 # Define the user message template for indices
 qna_user_message_indices = """

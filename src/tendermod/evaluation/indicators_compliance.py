@@ -27,11 +27,11 @@ def evaluate_indicators_compliance(user_input: str, k) -> MultipleIndicatorRespo
     #print(f"\n --- --- --- --- El vector store tiene {vectorStore._collection.count()} registros")
 
     # Evaluation
-    before = vectorStore._collection.count()
-    print(f"Count before retriever is {before}")
+    #before = vectorStore._collection.count()
+    #print(f"Count before retriever is {before}")
     context_for_query = build_context(retriever, chunks, user_input, k=k )
-    after = vectorStore._collection.count()
-    print(f"Count after retriever is {after}")
+    #after = vectorStore._collection.count()
+    #print(f"Count after retriever is {after}")
     user_message = qna_user_message_indices
     user_message = user_message.replace('{context}', context_for_query)
     user_message = user_message.replace('{question}', user_input)
