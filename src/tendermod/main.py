@@ -4,10 +4,12 @@ from tendermod.config.settings import OPENAI_API_KEY
 
 from tendermod.data_sources.redneet_db.sql_agent import build_company_sql_agent
 from tendermod.data_sources.redneet_db.xls_loader import load_db
+from tendermod.evaluation.compare_indicators import comparation
+from tendermod.ingestion.db_loader import get_specific_gold_indicator
 from tendermod.ingestion.ingestion_flow import ingest_documents
 from tendermod.ingestion.pdf_loader import load_docs
 from tendermod.ingestion.chunking import chunk_docs
-from tendermod.evaluation.indicators_compliance import evaluate_indicators_compliance
+
 from tendermod.config.settings import CHROMA_PERSIST_DIR
 from pathlib import Path
 import shutil
@@ -21,15 +23,20 @@ def main():
 
     #test_openai()
 
-    ### Enable only to ingest
-    #ingest_documents()
+    """Enable only to ingest"""
+    ingest_documents()
+    #load_db() # load from xls to db
 
-    ###Enable only to consult
+
+    """Enable only to consult"""
     #indicators_routine()
+    comparation()
+    #print(f"Respuesta final:\n {response} \n")
+    #print(f"Respuesta final:\n {response.answer[0].indicador} \n")
     
-    ###
-    #load_db()
-    build_company_sql_agent()
+    """SQL Agent"""
+    
+    #get_specific_gold_indicator(f"valor de capital de trabajo")
 
 
 def indicators_routine():

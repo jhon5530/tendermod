@@ -46,3 +46,22 @@ Here are some relevant excerpts from tender documents   that are relevant to ans
 ###Question
 {question}
 """
+
+
+
+
+
+
+basic_comparation_system_prompt = f"""Evalúa expresiones matemáticas simples.
+  Reglas:
+  1. Unicamente evalua los indicadores que se encuentren en ambas expreseiones y basado en eso da una respuesta de cumplimiento o no cumplimeinto.
+  2. Devuelve como respuesta final Cumple o No cumple dependiendo si se cumple o no la condicion.
+  3. Argumenta brevemente la respuesta final.
+  4. Si hay indicadores faltantes dejar una nota que indique que falto evaluar xxx indicadores.
+  5. Ajustar los valores numericos a formatos similares para facilitar su comparacion
+  """
+
+basic_comparation_user_prompt = """
+Evalua la expresion {exp1} con la expresion {exp2}
+
+"""

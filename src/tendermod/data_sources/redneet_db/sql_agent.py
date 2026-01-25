@@ -22,7 +22,7 @@ def build_company_sql_agent():
     #db = SQLDatabase.from_uri("sqlite:////content/redneet_database.db")
     print("sqlite:////"+db_path)
     #db = SQLDatabase.from_uri("sqlite:/data/redneet_db/redneet_database.db")
-    db = SQLDatabase.from_uri(f"sqlite:///{db_path}")
+    db = SQLDatabase.from_uri(f"sqlite:///{db_path}", sample_rows_in_table_info=100)
 
     # Initialize a SQL agent to interact with the customer database using the LLM
     
@@ -31,7 +31,10 @@ def build_company_sql_agent():
         llm,
         db=db,
         agent_type="openai-tools",
-        verbose=True
+        verbose=True,
+
     )
 
-    db_response = db_agent.run(f"valor de indice de endeudamiento")
+    return db_agent
+
+    
