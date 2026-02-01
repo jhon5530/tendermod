@@ -1,9 +1,9 @@
-from tendermod.evaluation.indicators_inference import get_indicators
+from tendermod.evaluation.indicators_inference import get_general_info, get_indicators
 from tendermod.evaluation.llm_client import run_llm_indicators_comparation
 from tendermod.ingestion.db_loader import get_specific_gold_indicator
 
 
-def comparation():
+def indicators_comparation():
 
     query = "Cuales los indicadores financieros como: Rentabilidades, capacidades, endeudamiento, indices"
     
@@ -35,8 +35,8 @@ def comparation():
 
     print("\n\nGold Indicators")
     print (gold_indicators["output"])
-
-    comparation_response = run_llm_indicators_comparation(str(gold_indicators["output"]), str(tender_indicators_json))
+    general_info = get_general_info("Cual es el presupuesto del proceso?", k=2)
+    comparation_response = run_llm_indicators_comparation(str(gold_indicators["output"]), str(tender_indicators_json), general_info)
     print(f"\n\nEl resultado de la comparacion es:\n {comparation_response}")
 
     #return tender_indicators
