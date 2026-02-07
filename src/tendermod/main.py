@@ -4,7 +4,9 @@ from tendermod.config.settings import OPENAI_API_KEY
 
 from tendermod.data_sources.redneet_db.sql_agent import build_company_sql_agent
 from tendermod.data_sources.redneet_db.xls_loader import load_db
+from tendermod.evaluation.compare_experience import check_compliance_experience, experience_comparation
 from tendermod.evaluation.compare_indicators import indicators_comparation
+from tendermod.evaluation.experience_inference import get_experience
 from tendermod.evaluation.indicators_inference import get_general_info, get_indicators
 from tendermod.ingestion.ingestion_experience_flow import ingest_experience_data
 from tendermod.ingestion.db_loader import get_specific_gold_indicator
@@ -35,24 +37,37 @@ def main():
     #query="Que experiencia se tiene cuyo objeto este relacionado con Obras electrica, solo entregame el objeto"
     #get_specific_gold_indicator(query)
     
-    vs = ingest_experience_data() # Ingesta de datos
-    res = vs.similarity_search("Equipos de red", k=10) # Validacion por similaridad
-    for r in res: #Impresion de datos
-        print(r.metadata["numero_rup"], r.metadata["cliente"], r.metadata["objeto"], r.metadata["valor"])
-    #[print(r, "\n\n\n") for r in result]
-    #raise Exception("Analiza!!!")
-
-
     """Enable only to consult"""
+    #indicators_comparation()
+    #experience_comparation()
+    
+    """###### TESTING ######"""
+
+    check_compliance_experience()
+
+    """Enable only to ingest experience data"""
+    #vs = ingest_experience_data() # Ingesta de datos
+    #res = vs.similarity_search("Equipos de red", k=10) # Validacion por similaridad
+    #for r in res: #Impresion de datos
+    #    print(r.metadata["numero_rup"], r.metadata["cliente"], r.metadata["objeto"], r.metadata["valor"])
+   
+
+    """Query to get experience"""
     
 
-    #indicators_comparation()
-    #print(f"Respuesta final:\n {response} \n")
-    #print(f"Respuesta final:\n {response.answer[0].indicador} \n")
-    
+
     """SQL Agent"""
     
     #get_specific_gold_indicator(f"valor de capital de trabajo")
+
+
+
+
+
+
+
+
+
 
 
 def indicators_routine():

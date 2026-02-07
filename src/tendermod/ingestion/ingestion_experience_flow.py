@@ -15,9 +15,6 @@ def ingest_experience_data():
     # Load docs and chunking
     chunks = ingest_and_chunk()
 
-    #print (chunks[0:3])
-    #raise Exception("!!!!!")
-
     # Embeddings and vectorStore
     vectorStore = create_vectorstor_from_text(chunks, embed_docs(), path=CHROMA_EXPERIENCE_PERSIST_DIR)
     

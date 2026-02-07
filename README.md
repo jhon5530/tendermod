@@ -9,10 +9,18 @@ Actividades ejecutadas
    - Adiciono el agente SQL con funcion de cargue
    - Actualizacion de version de langchain y otras con refactoring.
 - (24-01-26)Adicionar la logica para comparar los valores y terminar el caso de uso de experiencia completo
+- (31-01-26) Se realizo la adicion de experiencia pero unicamente:
+   - Ingesta de datos a db.
+   - Chunking y cargue a base de datos vectorial
+   - Se probo y funciona muy bien para traer objetos similares
+- (07-02-26)
+ - Adicionar el query especifico para que lea la experiencia en los pliegos y entregue un JSON
+ - Se creo un borrador de Script para que revise en base a la info el cumplimiento.
 
 Proximos pasos
-- Cambiar el modo de comparacion de indicadores para que la comparacion se haga punto por punto y no en prosa (ver chat GPT)
-- Repetir este paso y ahora desplegar el caso de uso de experiencia.
+- Continuar con experiencia:
+   - Continuar con los pasos del borrador en Script.
+   - Tomar la info del JSON y usarla para hacer la validacion de la experiencia
 - Una vez se tengan ambos casos operativos se deben afinar (Ej. Indicadores debe evaluar todos en una sola evaluacion) para que entreguen ls datos necesarios y guarden en disco la info para retomarla mas adelante.
 - Generar una version 1 de una interfaz grafica que permita:
    - Cargar los archivos de la licitacion
@@ -21,4 +29,5 @@ Proximos pasos
 
 
 Mejoras
- - Quizas es buena idea hacer al menos 3 consultas y de las 3 escoger la respuesta que mas probabilidades o repeticiones tenga, debido a que no siempre da la misma respuesta
+ - Quizas es buena idea hacer al menos 3 consultas y de las 3 escoger la respuesta que mas probabilidades o repeticiones tenga, debido a que no siempre da la misma respuesta.
+ - Cambiar el modo de comparacion de indicadores para que la comparacion se haga punto por punto y no en prosa (ver chat GPT), esto mejorara el resultado que aveces da resultados inesperados

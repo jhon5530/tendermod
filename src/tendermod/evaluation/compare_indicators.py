@@ -5,6 +5,7 @@ from tendermod.ingestion.db_loader import get_specific_gold_indicator
 
 def indicators_comparation():
 
+    """Query para obtener los indicadores del RAG"""
     query = "Cuales los indicadores financieros como: Rentabilidades, capacidades, endeudamiento, indices"
     
     k = 2
@@ -15,6 +16,7 @@ def indicators_comparation():
     identified_indicators = check_indicators_name(tender_indicators)
 
     
+    """Query para obtener los indicadores de la base de datos"""
     query = (
         "Devuelve un objeto JSON válido con los siguientes indicadores: "
         f"\n{identified_indicators}\n\n"

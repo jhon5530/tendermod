@@ -15,12 +15,10 @@ def create_retriever(vectorstore, k):
     return retriever
 
 
-"""
-def create_retriever(vectorstore):
+
+def create_retriever_experience(vectorstore, k):
     retriever = vectorstore.as_retriever(
         search_type='similarity',                                                   # Use similarity search (based on vector distance)
-        search_kwargs={'k': 5}                                                      # Retrieve top 5 most relevant documents
+        search_kwargs={'k': k}                                                      # Retrieve top 5 most relevant documents
     )
     return retriever    
-"""
- 
