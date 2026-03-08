@@ -30,6 +30,7 @@ def check_compliance_experience():
     rups = check_code_compliance(codes, min_codigos=3)
     print(f"RUP experience in compliance with codes: {rups}")          # -> lista
 
+    #TODO
     # Valide si cumple con el valor a acreditar
     # Valide si cumple con el objeto
 
@@ -48,7 +49,6 @@ def check_code_compliance(
 
     [code_list_normalized.append(normalize_to_prefix6(c)) for c in code_list]
 
-    print("Code List Normalized", code_list_normalized, "\n")
     """
     Devuelve los NUMERO RUP que cumplen TODOS los prefijos (AND):
     - Para cada prefijo (columna), el valor debe ser distinto de 0 (o no nulo).
