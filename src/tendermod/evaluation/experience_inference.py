@@ -42,8 +42,12 @@ def get_experience(user_input: str, k):
     #print(f"Context for query: \n {context_for_query}")
     #print(f"User message: \n {user_message}")
 
-    llm_response =  run_llm_indices(qna_system_message_experience, 
+    llm_response =  run_llm_indices(qna_system_message_experience,
                     user_message)
+
+    if "sorry" in llm_response.lower():
+        print("[get_experience] El retriever no encontró contexto de experiencia relevante")
+        return None
 
     # Parsing
     try:

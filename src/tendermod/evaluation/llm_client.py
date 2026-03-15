@@ -26,16 +26,15 @@ def run_llm_indices(system_message, user_message, max_tokens=1000, temperature=0
     return response
 
 
-def run_llm_indicators_comparation(var1, var2, general_info, max_tokens=1000, temperature=0.0, top_p=1):
-
+def run_llm_indicators_comparation(indicadores_emparejados: str, general_info: str, max_tokens=1000, temperature=0.0, top_p=1):
     client = OpenAI()
     user_prompt = basic_comparation_user_prompt
     user_prompt = user_prompt.replace("{general_info}", general_info)
-    user_prompt = user_prompt.replace("{exp1}", var1)
-    user_prompt = user_prompt.replace("{exp2}", var2)
+    user_prompt = user_prompt.replace("{indicadores_emparejados}", indicadores_emparejados)
 
-    print (f"System Propmt: \n { basic_comparation_system_prompt}")
-    print (f"User Propmt: \n { user_prompt}")
+    print(f"System Prompt:\n{basic_comparation_system_prompt}")
+    print(f"User Prompt:\n{user_prompt}")
+
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -45,8 +44,7 @@ def run_llm_indicators_comparation(var1, var2, general_info, max_tokens=1000, te
         max_tokens=max_tokens,
         temperature=temperature,
         top_p=top_p
-        )
-        # Extract and print the generated text from the response
+    )
     return response.choices[0].message.content
 
 

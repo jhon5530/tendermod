@@ -31,8 +31,7 @@ def build_company_sql_agent():
         llm,
         db=db,
         agent_type="openai-tools",
-        verbose=True,
-
+        verbose=False,
     )
 
     return db_agent

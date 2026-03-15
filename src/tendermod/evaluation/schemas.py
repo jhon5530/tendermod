@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Literal
 
 class Indicator(BaseModel):
     indicador: str = Field(description="El nombre del indicador")
@@ -48,6 +48,20 @@ class ExperienceResponse(BaseModel):
         description="Nombre de la sección del documento",
         alias="Seccion"
     )
+    regla_codigos: Literal["ALL", "AT_LEAST_ONE"] = Field(
+        default="AT_LEAST_ONE",
+        description="Regla lógica de validación: ALL si el pliego exige todos los códigos simultáneamente, AT_LEAST_ONE si basta con uno",
+        alias="Regla codigos"
+    )
+    objeto_exige_relevancia: Literal["SI", "NO", "NO_ESPECIFICADO"] = Field(
+        default="NO_ESPECIFICADO",
+        description=(
+            "SI si el pliego exige explícitamente que la experiencia sea relacionada "
+            "con el objeto del proceso. NO si lo descarta. NO_ESPECIFICADO si no hay "
+            "suficiente información para determinarlo."
+        ),
+        alias="Objeto exige relevancia"
+    )
 
 
 class IndicatorComplianceResult(BaseModel):
@@ -59,9 +73,15 @@ class IndicatorComplianceResult(BaseModel):
 
 class RupExperienceResult(BaseModel):
     numero_rup: Union[int, str] = Field(description="Número RUP del proponente")
+    cliente: Optional[str] = Field(default=None, description="Nombre del cliente/entidad del contrato")
+    valor_cop: Optional[float] = Field(default=None, description="Valor del contrato en COP")
     cumple_codigos: bool = Field(description="True si cumple los códigos UNSPSC requeridos")
     cumple_valor: Optional[bool] = Field(default=None, description="True si cumple valor mínimo. None si no aplica")
     cumple_objeto: Optional[bool] = Field(default=None, description="True si el objeto es compatible. None si no aplica")
+    score_objeto: Optional[float] = Field(
+        default=None,
+        description="Score de similitud semántica con el objeto requerido (0.0-1.0). None si no aplica o no hay datos en ChromaDB."
+    )
     cumple_total: bool = Field(description="True solo si todos los criterios evaluables son True")
 
 
@@ -70,5 +90,22 @@ class ExperienceComplianceResult(BaseModel):
     valor_requerido_cop: Optional[float] = Field(default=None, description="Valor mínimo requerido en COP")
     objeto_requerido: Optional[str] = Field(default=None, description="Objeto/alcance requerido del pliego")
     rups_evaluados: List[RupExperienceResult] = Field(default=[], description="Resultados por RUP")
+    rups_candidatos_codigos: List[Union[int, str]] = Field(
+        default=[],
+        description="Pool completo de RUPs que cumplen códigos UNSPSC (antes de aplicar top-N)"
+    )
+    cantidad_contratos_requerida: Optional[int] = Field(
+        default=None,
+        description="N máximo de contratos a seleccionar para acreditar experiencia (None = sin límite)"
+    )
     rups_cumplen: List[Union[int, str]] = Field(default=[], description="RUPs que cumplen todos los criterios evaluables")
+    total_valor_cop: Optional[float] = Field(default=None, description="Suma total en COP de los RUPs seleccionados (top-N)")
+    rups_excluidos_por_objeto: List[Union[int, str]] = Field(
+        default=[],
+        description="RUPs del top-N excluidos por no cumplir relevancia semántica con el objeto del proceso (Fase 2)"
+    )
+    objeto_exige_relevancia: Optional[str] = Field(
+        default=None,
+        description="Valor extraído del pliego para el filtro de objeto (SI/NO/NO_ESPECIFICADO)"
+    )
     cumple: bool = Field(default=False, description="True si al menos 1 RUP cumple todos los criterios")

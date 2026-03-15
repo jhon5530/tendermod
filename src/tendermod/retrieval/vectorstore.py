@@ -45,10 +45,18 @@ def delete_current_vectorStore(path = CHROMA_PERSIST_DIR):
     else:
         print("Chroma DB no existe")
 
-def read_vectorstore(embeddings, path = CHROMA_PERSIST_DIR):
-    vectorstore = Chroma(
-    persist_directory=path,
-    embedding_function=embeddings
-    )
+def read_vectorstore(embeddings, path=CHROMA_PERSIST_DIR, collection_name=None):
+    """
+    Lee un vectorstore persistido en `path`.
 
-    return vectorstore
+    - Si `collection_name` es None, usa la colección default de Chroma.
+    - Pasar `collection_name="rup"` para leer la colección de experiencia
+      creada por `create_vectorstor_from_text()`.
+    """
+    kwargs = {
+        "persist_directory": path,
+        "embedding_function": embeddings,
+    }
+    if collection_name:
+        kwargs["collection_name"] = collection_name
+    return Chroma(**kwargs)

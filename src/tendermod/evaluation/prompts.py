@@ -52,20 +52,36 @@ Here are some relevant excerpts from tender documents   that are relevant to ans
 
 
 
-basic_comparation_system_prompt = f"""Evalúa expresiones matemáticas simples.
-  Reglas:
-  1. Unicamente evalua los indicadores que se encuentren en ambas expresiones y basado en eso da una respuesta de cumplimiento o no cumplimeinto.
-  2. Devuelve como respuesta final Cumple o No cumple dependiendo si se cumple o no la condicion.
-  3. Argumenta brevemente la respuesta final.
-  4. Si hay indicadores faltantes dejar una nota que indique que falto evaluar xxx indicadores.
-  5. Ajustar los valores numericos a formatos similares para facilitar su comparacion
-  """
+basic_comparation_system_prompt = """Eres un evaluador de indicadores financieros para licitaciones públicas colombianas.
+
+Recibirás una lista de indicadores emparejados. Cada elemento tiene:
+- "indicador": nombre del indicador
+- "valor_empresa": valor real de la empresa
+- "condicion": operador de comparación ("Mayor o igual a", "Menor o igual a", etc.)
+- "umbral": valor mínimo o máximo requerido por el pliego
+
+Tu tarea es evaluar si el valor de la empresa cumple la condición requerida por el pliego.
+
+Reglas:
+1. Evalúa cada indicador comparando valor_empresa contra umbral usando la condicion.
+2. Un indicador CUMPLE si:
+   - condicion = "Mayor o igual a" → valor_empresa >= umbral
+   - condicion = "Menor o igual a" → valor_empresa <= umbral
+   - condicion = "Mayor que" → valor_empresa > umbral
+   - condicion = "Menor que" → valor_empresa < umbral
+3. Si el umbral requiere cálculo contextual (ej: "50% del presupuesto"), usa la información general del proceso para resolverlo.
+4. Si un indicador no tiene valor_empresa (None o faltante), márcalo como no evaluable.
+5. La evaluación final es "Cumple" si TODOS los indicadores evaluables cumplen, "No cumple" si alguno falla.
+6. Responde con: evaluación por indicador, conclusión final ("Cumple" o "No cumple"), y argumento breve.
+"""
 
 basic_comparation_user_prompt = """
-Informacion general del proceso:\n {general_info} \n
-Evalua la expresion {exp1} con la expresion {exp2}
+Información general del proceso:
+{general_info}
 
+Evalúa el siguiente listado de indicadores de la empresa contra los requisitos del pliego:
 
+{indicadores_emparejados}
 """
 
 
@@ -122,11 +138,20 @@ Please adhere to the following response guidelines:
 -If the context is not provided, your response should also be: "Sorry, this is out of my knowledge base."
 
 The agent must answer the following questions based on the contextual information:
-1- What are the required experience codes? (Only respond with the codes (example: D-545665), not the description. Codes can be repeated; do not delete any. List all codes that appear in the text.)
+1- What are the required experience codes? UNSPSC codes are always numeric and have 6 or 8 digits. Apply these rules strictly:
+   - If the code appears already formed (e.g., "432217" or "43-22-17-00"), extract it removing hyphens and keeping only digits.
+   - If the code appears as a TABLE with columns GRUPO / SEGMENTO / FAMILIA / CLASE, you MUST concatenate the numeric parts in order: SEGMENTO (2 digits) + FAMILIA (2 digits) + CLASE (2 digits) = 6-digit code. Example: SEGMENTO=43, FAMILIA=22, CLASE=17 → "432217". The GRUPO column contains a letter prefix (e.g., "E -") that is NOT part of the code — ignore it completely.
+   - NEVER return isolated 1 or 2-digit fragments as separate codes. Every entry in "Listado de codigos" must be a complete 6 or 8-digit numeric string.
+   - Codes can be repeated; do not delete any. List all complete codes that appear.
 2- How many UNSPC codes must be met or included in each contract?
 3- What is the required purpose of the experience? Answer only if the word "purpose" appears verbatim. In this case, write what follows the next word verbatim, without any changes, and in quotation marks. If the word "purpose" does not appear, then answer "No specific purpose is required."
 4- How many contracts can be supported as experience?
-5- What is the required value in pesos or minimum monthly wage (SMMLV) to demonstrate experience?
+5- What is the required value to demonstrate experience? Always include the unit in your answer: if the value is in SMMLV, write the number followed by "SMMLV" (example: "864.07 SMMLV"). If the value is in pesos (COP), write the full amount followed by "COP" (example: "$1.229.255.702 COP"). Never omit the unit.
+6- Does the tender explicitly require that the bidder must have experience in ALL of the listed UNSPSC codes simultaneously in a single contract? Answer ONLY "ALL" if the pliego explicitly states that all codes must be present together. In all other cases, answer "AT_LEAST_ONE".
+7- Does the tender explicitly require that the experience must be related to or in the same area as the object/purpose of this specific contracting process?
+   Answer "SI" ONLY if the pliego uses phrases like "experiencia relacionada con el objeto", "experiencia en actividades similares al objeto del contrato", or explicitly links experience requirements to the purpose/object of this process.
+   Answer "NO" if the pliego explicitly states that experience is not restricted by the object or purpose.
+   Answer "NO_ESPECIFICADO" in all other cases (object is mentioned but not linked to experience requirements, or no information available).
 
 It is acceptable not to have an answer to any of these questions and simply respond "I cannot find information on this," but never fabricate information. Only provide the answer. not the question.
 
@@ -138,9 +163,11 @@ Return only the result as JSON in the following format:
      "Cuantos codigos": " ",
      "Objeto": " ",
      "Cantidad de contratos": " ",
-     "Valor a acreditar": " ",
+     "Valor a acreditar": "864.07 SMMLV",
      "Pagina": "Toma la pagina de los metadatos",
      "Seccion": "toma la seccion del contexto",
+     "Regla codigos": "AT_LEAST_ONE",
+     "Objeto exige relevancia": "NO_ESPECIFICADO"
 }
 
 
