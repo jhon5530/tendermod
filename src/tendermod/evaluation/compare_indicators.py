@@ -1,15 +1,34 @@
+import re
+from typing import Optional
+
 from tendermod.evaluation.indicators_inference import get_general_info, get_indicators
 from tendermod.evaluation.llm_client import run_llm_indicators_comparation
+from tendermod.evaluation.schemas import IndicatorComplianceResult
 from tendermod.ingestion.db_loader import get_specific_gold_indicator
 
 
-def indicators_comparation():
+def extract_compliance_bool(text: str) -> Optional[bool]:
+    if re.search(r'\bNo cumple\b', text, re.IGNORECASE):
+        return False
+    if re.search(r'\bCumple\b', text, re.IGNORECASE):
+        return True
+    return None
+
+
+def indicators_comparation() -> Optional[IndicatorComplianceResult]:
 
     """Query para obtener los indicadores del RAG"""
     query = "Cuales los indicadores financieros como: Rentabilidades, capacidades, endeudamiento, indices"
     
     k = 2
     tender_indicators = get_indicators(user_input=query, k=k)
+    if tender_indicators is None:
+        return IndicatorComplianceResult(
+            cumple=None,
+            detalle="Error al extraer indicadores del PDF",
+            indicadores_evaluados=[],
+            indicadores_faltantes=[]
+        )
     #print(f"\n Tender indicators: {tender_indicators}")
     tender_indicators_json = from_indicator_schema_to_simple_json(tender_indicators)
     #print(f"\n Tender indicators Json: {tender_indicators_json}")
@@ -40,6 +59,14 @@ def indicators_comparation():
     general_info = get_general_info("Cual es el presupuesto del proceso?", k=2)
     comparation_response = run_llm_indicators_comparation(str(gold_indicators["output"]), str(tender_indicators_json), general_info)
     print(f"\n\nEl resultado de la comparacion es:\n {comparation_response}")
+
+    cumple = extract_compliance_bool(comparation_response)
+    return IndicatorComplianceResult(
+        cumple=cumple,
+        detalle=comparation_response,
+        indicadores_evaluados=[i.indicador for i in tender_indicators.answer],
+        indicadores_faltantes=[]
+    )
 
     #return tender_indicators
 

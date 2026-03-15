@@ -38,12 +38,12 @@ def main():
     #get_specific_gold_indicator(query)
     
     """Enable only to consult"""
-    #indicators_comparation()
+    indicators_comparation()
     #experience_comparation()
     
     """###### TESTING ######"""
 
-    check_compliance_experience()
+    #check_compliance_experience()
 
     """Enable only to ingest experience data"""
     #vs = ingest_experience_data() # Ingesta de datos

@@ -140,7 +140,7 @@ Return only the result as JSON in the following format:
      "Cantidad de contratos": " ",
      "Valor a acreditar": " ",
      "Pagina": "Toma la pagina de los metadatos",
-     "Seccion: "toma la seccion del contexto",
+     "Seccion": "toma la seccion del contexto",
 }
 
 

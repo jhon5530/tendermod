@@ -45,7 +45,7 @@ def get_indicators(user_input: str, k) -> MultipleIndicatorResponse:
 
     except Exception as e:
             print(e)
-            parsed_response = {"answer": [{"indicador": "Null", "valor": "Null"}]}
+            return None
 
     return parsed_response
 

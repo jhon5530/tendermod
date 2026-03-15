@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import List, Union
+from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Union, Optional
 
 class Indicator(BaseModel):
     indicador: str = Field(description="El nombre del indicador")
@@ -11,6 +11,8 @@ class MultipleIndicatorResponse(BaseModel):
 
 
 class ExperienceResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     listado_codigos: List[str] = Field(
         default = [],
         description="Lista de códigos UNSPSC de 8 dígitos",
@@ -46,3 +48,27 @@ class ExperienceResponse(BaseModel):
         description="Nombre de la sección del documento",
         alias="Seccion"
     )
+
+
+class IndicatorComplianceResult(BaseModel):
+    cumple: Optional[bool] = Field(default=None, description="True si cumple, False si no, None si no se pudo determinar")
+    detalle: str = Field(default="", description="Texto completo del LLM con la argumentación")
+    indicadores_evaluados: List[str] = Field(default=[], description="Nombres de indicadores que se compararon")
+    indicadores_faltantes: List[str] = Field(default=[], description="Indicadores requeridos sin datos en SQLite")
+
+
+class RupExperienceResult(BaseModel):
+    numero_rup: Union[int, str] = Field(description="Número RUP del proponente")
+    cumple_codigos: bool = Field(description="True si cumple los códigos UNSPSC requeridos")
+    cumple_valor: Optional[bool] = Field(default=None, description="True si cumple valor mínimo. None si no aplica")
+    cumple_objeto: Optional[bool] = Field(default=None, description="True si el objeto es compatible. None si no aplica")
+    cumple_total: bool = Field(description="True solo si todos los criterios evaluables son True")
+
+
+class ExperienceComplianceResult(BaseModel):
+    codigos_requeridos: List[str] = Field(default=[], description="Códigos UNSPSC extraídos del pliego")
+    valor_requerido_cop: Optional[float] = Field(default=None, description="Valor mínimo requerido en COP")
+    objeto_requerido: Optional[str] = Field(default=None, description="Objeto/alcance requerido del pliego")
+    rups_evaluados: List[RupExperienceResult] = Field(default=[], description="Resultados por RUP")
+    rups_cumplen: List[Union[int, str]] = Field(default=[], description="RUPs que cumplen todos los criterios evaluables")
+    cumple: bool = Field(default=False, description="True si al menos 1 RUP cumple todos los criterios")
