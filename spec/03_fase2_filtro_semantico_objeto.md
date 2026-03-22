@@ -8,13 +8,15 @@ La Fase 1 implementó la selección de top-N contratos por valor. Esta fase agre
 
 ---
 
-## Bug crítico (prerrequisito)
+## Bug crítico (prerrequisito) ✅ RESUELTO
 
 `check_object_compliance()` en `compare_experience.py` llama:
 ```python
 read_vectorstore(embed_docs(), path=CHROMA_EXPERIENCE_PERSIST_DIR)
 ```
 Sin especificar `collection_name="rup"`, por lo que actualmente siempre devuelve `None`.
+
+> **Fix aplicado:** `read_vectorstore()` acepta ahora `collection_name=None` como parámetro opcional. `filter_rups_by_object()` pasa `collection_name="rup"` explícitamente.
 
 ---
 
@@ -34,7 +36,7 @@ Sin especificar `collection_name="rup"`, por lo que actualmente siempre devuelve
 
 ## Cambios por archivo
 
-### `src/tendermod/evaluation/schemas.py`
+### `src/tendermod/evaluation/schemas.py` ✅ IMPLEMENTADO
 
 **`ExperienceResponse`** — nuevo campo:
 ```python
@@ -60,7 +62,7 @@ objeto_exige_relevancia: Optional[str] = None
 
 ---
 
-### `src/tendermod/evaluation/prompts.py`
+### `src/tendermod/evaluation/prompts.py` ✅ IMPLEMENTADO
 
 Agregar **pregunta 7** en `qna_system_message_experience` (después de la pregunta 6 de `regla_codigos`):
 
@@ -81,7 +83,7 @@ Agregar en el ejemplo JSON del prompt:
 
 ---
 
-### `src/tendermod/retrieval/vectorstore.py`
+### `src/tendermod/retrieval/vectorstore.py` ✅ IMPLEMENTADO
 
 Agregar parámetro opcional `collection_name` a `read_vectorstore()`:
 ```python
@@ -95,7 +97,7 @@ Cambio backward compatible — callers existentes sin `collection_name` no se ve
 
 ---
 
-### `src/tendermod/evaluation/compare_experience.py`
+### `src/tendermod/evaluation/compare_experience.py` ✅ IMPLEMENTADO
 
 **Nueva función `filter_rups_by_object()`** (reemplaza el bucle individual de `check_object_compliance`):
 
@@ -149,11 +151,15 @@ Validar en el output:
 
 ---
 
-## Archivos a modificar
+## Archivos modificados
 
-| Archivo | Tipo de cambio |
-|---|---|
-| `src/tendermod/evaluation/schemas.py` | 3 campos nuevos en 3 schemas |
-| `src/tendermod/evaluation/prompts.py` | Pregunta 7 en system prompt de experiencia |
-| `src/tendermod/retrieval/vectorstore.py` | Parámetro `collection_name` en `read_vectorstore()` |
-| `src/tendermod/evaluation/compare_experience.py` | Nueva `filter_rups_by_object()`, reordenar flujo |
+| Archivo | Cambio | Estado |
+|---|---|---|
+| `src/tendermod/evaluation/schemas.py` | 3 campos nuevos en 3 schemas | ✅ |
+| `src/tendermod/evaluation/prompts.py` | Pregunta 7 en system prompt de experiencia | ✅ |
+| `src/tendermod/retrieval/vectorstore.py` | Parámetro `collection_name` en `read_vectorstore()` | ✅ |
+| `src/tendermod/evaluation/compare_experience.py` | Nueva `filter_rups_by_object()`, reordenar flujo, fix clamp scores [0,1] | ✅ |
+
+## Fix adicional aplicado
+
+**Warning scores negativos en ChromaDB** — `filter_rups_by_object()` clampea cada score al rango `[0.0, 1.0]` antes de almacenarlo, eliminando el `UserWarning: Relevance scores must be between 0 and 1` que emitía LangChain cuando los embeddings producen distancias fuera de rango.

@@ -146,7 +146,11 @@ The agent must answer the following questions based on the contextual informatio
 2- How many UNSPC codes must be met or included in each contract?
 3- What is the required purpose of the experience? Answer only if the word "purpose" appears verbatim. In this case, write what follows the next word verbatim, without any changes, and in quotation marks. If the word "purpose" does not appear, then answer "No specific purpose is required."
 4- How many contracts can be supported as experience?
-5- What is the required value to demonstrate experience? Always include the unit in your answer: if the value is in SMMLV, write the number followed by "SMMLV" (example: "864.07 SMMLV"). If the value is in pesos (COP), write the full amount followed by "COP" (example: "$1.229.255.702 COP"). Never omit the unit.
+5- What is the required value to demonstrate experience? Distinguish carefully between these cases:
+   - If the value is a fixed number of SMMLV (e.g., "250 SMMLV"), write the number followed by "SMMLV" (example: "250 SMMLV").
+   - If the value is expressed as a percentage of the official budget or contract value (e.g., "100% del presupuesto oficial", "igual al presupuesto", "100% del valor del contrato"), write it as "X% del presupuesto" (example: "100% del presupuesto"). Do NOT convert this to a fixed SMMLV amount.
+   - If the value is in pesos (COP), write the full amount followed by "COP" (example: "$1.229.255.702 COP").
+   Never omit the unit. Never confuse "100% del presupuesto expresado en SMMLV" with "100 SMMLV" — the former is a percentage, the latter is a fixed amount.
 6- Does the tender explicitly require that the bidder must have experience in ALL of the listed UNSPSC codes simultaneously in a single contract? Answer ONLY "ALL" if the pliego explicitly states that all codes must be present together. In all other cases, answer "AT_LEAST_ONE".
 7- Does the tender explicitly require that the experience must be related to or in the same area as the object/purpose of this specific contracting process?
    Answer "SI" ONLY if the pliego uses phrases like "experiencia relacionada con el objeto", "experiencia en actividades similares al objeto del contrato", or explicitly links experience requirements to the purpose/object of this process.

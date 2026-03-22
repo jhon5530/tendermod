@@ -10,8 +10,25 @@ from tendermod.ingestion.experience_db_loader import DB_PATH
 from tendermod.config.settings import CHROMA_EXPERIENCE_PERSIST_DIR
 from tendermod.retrieval.embeddings import embed_docs
 from tendermod.retrieval.vectorstore import read_vectorstore
+from tendermod.evaluation.indicators_inference import get_general_info
 
 SMMLV_2026 = 1_423_500  # Salario Mínimo Mensual Legal Vigente 2026 en COP
+
+
+def _parse_presupuesto(texto: str) -> Optional[float]:
+    """Extrae el valor numérico en COP del texto libre que devuelve get_general_info."""
+    if not texto:
+        return None
+    nums = re.findall(r'\$?\s*([\d.]+)', texto)
+    for raw in nums:
+        cleaned = raw.replace('.', '')
+        try:
+            val = float(cleaned)
+            if val > 1_000_000:
+                return val
+        except ValueError:
+            continue
+    return None
 
 
 def experience_comparation() -> Optional[ExperienceResponse]:
@@ -33,16 +50,27 @@ def experience_comparation() -> Optional[ExperienceResponse]:
 
 
 
-def parse_valor(valor_str: str) -> Optional[float]:
+def parse_valor(valor_str: str, presupuesto_cop: Optional[float] = None) -> Optional[float]:
     """
     Parsea el string de valor mínimo requerido extraído del pliego por el LLM.
-    Soporta formatos: '500 SMMLV', '$100.000.000', '100,000,000' (anglosajón).
+    Soporta formatos: '500 SMMLV', '$100.000.000', '100,000,000' (anglosajón),
+    y '100% del presupuesto' (porcentaje del presupuesto oficial).
     Retorna None si no se puede parsear (valor no especificado o formato desconocido).
     """
     if not valor_str or valor_str.strip() in ("None", ""):
         return None
     if re.search(r'cannot find|no se encontr|not found|no especif', valor_str, re.IGNORECASE):
         return None
+
+    # Caso porcentaje del presupuesto: "100% del presupuesto", "50%", etc.
+    match_pct = re.search(r'(\d+[\.,]?\d*)\s*%', valor_str)
+    if match_pct:
+        if presupuesto_cop is not None:
+            pct = float(match_pct.group(1).replace(',', '.'))
+            return (pct / 100) * presupuesto_cop
+        else:
+            print("[parse_valor] Porcentaje detectado pero presupuesto no disponible → None")
+            return None
 
     # Caso SMMLV
     if re.search(r'smmlv', valor_str, re.IGNORECASE):
@@ -454,7 +482,10 @@ def check_compliance_experience(tender_experience: ExperienceResponse) -> Experi
     print(f"[Fase 2] RUPs filtrados para cálculo de valor: {rups_filtrados}")
 
     # --- VALOR: calcular sobre el pool ya filtrado por objeto ---
-    valor_cop = parse_valor(tender_experience.valor)
+    presupuesto_str = get_general_info("Cual es el presupuesto oficial del proceso?", k=2)
+    presupuesto_cop = _parse_presupuesto(presupuesto_str)
+    print(f"Presupuesto oficial recuperado: {presupuesto_cop}")
+    valor_cop = parse_valor(tender_experience.valor, presupuesto_cop=presupuesto_cop)
     print(f"Valor mínimo requerido (COP): {valor_cop}")
 
     cumple_valor_global = (
