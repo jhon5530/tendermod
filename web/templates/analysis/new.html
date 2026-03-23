@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Nueva Evaluacion{% endblock %}
+{% block nav_new %}active{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-7">
+
+        <!-- Stepper -->
+        <div class="d-flex align-items-center gap-2 mb-4">
+            <span class="step-badge bg-primary text-white">1</span>
+            <span class="fw-semibold text-primary">Subir PDF</span>
+            <div class="flex-grow-1 border-top mx-2"></div>
+            <span class="step-badge bg-light text-muted border">2</span>
+            <span class="text-muted">Extraer requisitos</span>
+            <div class="flex-grow-1 border-top mx-2"></div>
+            <span class="step-badge bg-light text-muted border">3</span>
+            <span class="text-muted">Validar y evaluar</span>
+            <div class="flex-grow-1 border-top mx-2"></div>
+            <span class="step-badge bg-light text-muted border">4</span>
+            <span class="text-muted">Resultados</span>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-header card-header-tendermod">
+                <h5 class="mb-0">
+                    <i class="bi bi-file-earmark-pdf me-2"></i>Nueva Evaluacion — Subir PDF del Pliego
+                </h5>
+            </div>
+            <div class="card-body p-4">
+                <p class="text-muted mb-4">
+                    Suba el PDF del pliego de condiciones de la licitacion que desea evaluar.
+                    El sistema ingirira el documento en la base vectorial y lo dejara listo para
+                    la extraccion de requisitos.
+                </p>
+
+                <form method="post" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    <div class="mb-4">
+                        <label for="{{ form.pdf_file.id_for_label }}" class="form-label fw-semibold">
+                            {{ form.pdf_file.label }}
+                        </label>
+                        <input type="file" name="pdf_file" accept=".pdf"
+                               class="form-control form-control-lg{% if form.pdf_file.errors %} is-invalid{% endif %}"
+                               id="{{ form.pdf_file.id_for_label }}" required>
+                        {% if form.pdf_file.errors %}
+                            <div class="invalid-feedback">{{ form.pdf_file.errors.0 }}</div>
+                        {% endif %}
+                        <div class="form-text">{{ form.pdf_file.help_text }}</div>
+                    </div>
+
+                    <div class="alert alert-info small mb-4">
+                        <i class="bi bi-info-circle me-1"></i>
+                        <strong>Nota:</strong> Al subir un nuevo PDF se eliminaran los PDFs anteriores del directorio
+                        <code>data/</code> y se recreara la base vectorial. Asegurese de haber cargado los datos de la
+                        empresa antes de continuar.
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="bi bi-cloud-upload me-2"></i>Subir PDF e iniciar ingesta
+                        </button>
+                        <a href="{% url 'analysis:list' %}" class="btn btn-outline-secondary btn-lg">
+                            Cancelar
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}

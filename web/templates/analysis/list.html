@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Historial de Evaluaciones{% endblock %}
+{% block nav_list %}active{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-list-ul me-2 text-primary"></i>Historial de Evaluaciones</h2>
+        <p class="text-muted mb-0">Todas las sesiones de analisis de licitaciones.</p>
+    </div>
+    <a href="{% url 'analysis:new' %}" class="btn btn-primary">
+        <i class="bi bi-plus-circle me-1"></i>Nueva Evaluacion
+    </a>
+</div>
+
+{% if sessions %}
+<div class="card border-0 shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>#</th>
+                        <th>PDF</th>
+                        <th>Estado</th>
+                        <th class="text-center">Experiencia</th>
+                        <th class="text-center">Indicadores</th>
+                        <th class="text-center">Resultado Final</th>
+                        <th>Fecha</th>
+                        <th class="text-center">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for session in sessions %}
+                    <tr>
+                        <td class="text-muted">{{ session.pk }}</td>
+                        <td>
+                            <i class="bi bi-file-earmark-pdf text-danger me-1"></i>
+                            {{ session.pdf_filename|default:"—" }}
+                        </td>
+                        <td>
+                            <span class="badge bg-{{ session.status_display_class }}">
+                                {{ session.get_status_display }}
+                            </span>
+                        </td>
+                        <td class="text-center">
+                            {% if session.result and session.result.cumple_experiencia is not None %}
+                                {% if session.result.cumple_experiencia %}
+                                    <span class="badge bg-success">CUMPLE</span>
+                                {% else %}
+                                    <span class="badge bg-danger">NO CUMPLE</span>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if session.result and session.result.cumple_indicadores is not None %}
+                                {% if session.result.cumple_indicadores %}
+                                    <span class="badge bg-success">CUMPLE</span>
+                                {% else %}
+                                    <span class="badge bg-danger">NO CUMPLE</span>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if session.result and session.result.cumple_final is not None %}
+                                {% if session.result.cumple_final %}
+                                    <span class="badge bg-success badge-cumple">CUMPLE</span>
+                                {% else %}
+                                    <span class="badge bg-danger badge-cumple">NO CUMPLE</span>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-muted small">{{ session.created_at|date:"d/m/Y H:i" }}</td>
+                        <td class="text-center">
+                            <div class="btn-group btn-group-sm">
+                                {% if session.status == 'ingesting_pdf' or session.status == 'created' or session.status == 'pdf_ready' %}
+                                    <a href="{% url 'analysis:step1' pk=session.pk %}"
+                                       class="btn btn-outline-primary" title="Paso 1">
+                                        <i class="bi bi-1-circle"></i>
+                                    </a>
+                                {% elif session.status == 'extracted' %}
+                                    <a href="{% url 'analysis:step2' pk=session.pk %}"
+                                       class="btn btn-outline-primary" title="Paso 2">
+                                        <i class="bi bi-2-circle"></i>
+                                    </a>
+                                {% endif %}
+                                <a href="{% url 'analysis:results' pk=session.pk %}"
+                                   class="btn btn-outline-secondary" title="Resultados">
+                                    <i class="bi bi-bar-chart-steps"></i>
+                                </a>
+                                <a href="{% url 'analysis:export_excel' pk=session.pk %}"
+                                   class="btn btn-outline-success" title="Descargar Excel">
+                                    <i class="bi bi-file-earmark-spreadsheet"></i>
+                                </a>
+                                <a href="{% url 'analysis:export_text' pk=session.pk %}"
+                                   class="btn btn-outline-secondary" title="Descargar TXT">
+                                    <i class="bi bi-file-earmark-text"></i>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="card border-0 shadow-sm">
+    <div class="card-body text-center py-5">
+        <i class="bi bi-inbox display-1 text-muted"></i>
+        <h5 class="mt-3 text-muted">No hay evaluaciones aun</h5>
+        <p class="text-muted">Comience cargando los datos de la empresa y subiendo el PDF del pliego.</p>
+        <div class="d-flex gap-2 justify-content-center mt-3">
+            <a href="{% url 'redneet:dashboard' %}" class="btn btn-outline-primary">
+                <i class="bi bi-database me-1"></i>Cargar datos empresa
+            </a>
+            <a href="{% url 'analysis:new' %}" class="btn btn-primary">
+                <i class="bi bi-plus-circle me-1"></i>Nueva evaluacion
+            </a>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

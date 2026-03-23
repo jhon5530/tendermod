@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Datos Empresa{% endblock %}
+{% block nav_redneet %}active{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-database me-2 text-primary"></i>Datos de la Empresa (Redneet)</h2>
+        <p class="text-muted mb-0">Cargue los archivos Excel con los datos financieros y de experiencia de la empresa proponente.</p>
+    </div>
+    <button class="btn btn-outline-secondary btn-sm" onclick="refreshDbStatus()">
+        <i class="bi bi-arrow-clockwise me-1"></i>Actualizar conteos
+    </button>
+</div>
+
+<!-- DB Status Cards -->
+<div class="row g-3 mb-4" id="db-status-cards">
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body text-center">
+                <div class="fs-1 text-primary fw-bold" id="count-indicadores">
+                    <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                </div>
+                <p class="text-muted mb-0">Registros en <strong>indicadores</strong></p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body text-center">
+                <div class="fs-1 text-success fw-bold" id="count-experiencia">
+                    <div class="spinner-border spinner-border-sm text-success" role="status"></div>
+                </div>
+                <p class="text-muted mb-0">Registros en <strong>experiencia</strong></p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body text-center">
+                <div class="fs-3 fw-bold" id="db-exists-icon">
+                    <div class="spinner-border spinner-border-sm" role="status"></div>
+                </div>
+                <p class="text-muted mb-0">Estado base de datos</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Upload forms -->
+<div class="row g-4">
+
+    <!-- Indicadores -->
+    <div class="col-md-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header card-header-tendermod">
+                <h5 class="mb-0">
+                    <i class="bi bi-bar-chart-line me-2"></i>Indicadores Financieros
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">
+                    Suba el archivo <code>rib.xlsx</code> con los indicadores financieros de la empresa.
+                    Este archivo se cargara en la tabla <strong>indicadores</strong> de la base de datos.
+                </p>
+
+                <form method="post" enctype="multipart/form-data" action="{% url 'redneet:upload_indicadores' %}">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="id_archivo_ind" class="form-label fw-semibold">
+                            {{ form_indicadores.archivo.label }}
+                        </label>
+                        <input type="file" name="archivo" accept=".xlsx"
+                               class="form-control{% if form_indicadores.archivo.errors %} is-invalid{% endif %}"
+                               id="id_archivo_ind" required>
+                        {% if form_indicadores.archivo.errors %}
+                            <div class="invalid-feedback">{{ form_indicadores.archivo.errors.0 }}</div>
+                        {% endif %}
+                        <div class="form-text">{{ form_indicadores.archivo.help_text }}</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-upload me-1"></i>Cargar indicadores
+                    </button>
+                </form>
+
+                {% if task_id_indicadores %}
+                <hr>
+                <div id="spinner-indicadores">
+                    <div class="d-flex align-items-center gap-2 text-secondary">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                        <span>Procesando indicadores...</span>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Experiencia -->
+    <div class="col-md-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header card-header-tendermod">
+                <h5 class="mb-0">
+                    <i class="bi bi-briefcase me-2"></i>Experiencia RUP
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">
+                    Suba el archivo <code>experiencia_rup.xlsx</code> con la experiencia registrada en el RUP.
+                    Se cargara en SQLite y se vectorizara en ChromaDB.
+                </p>
+
+                <form method="post" enctype="multipart/form-data" action="{% url 'redneet:upload_experiencia' %}">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="id_archivo_exp" class="form-label fw-semibold">
+                            {{ form_experiencia.archivo.label }}
+                        </label>
+                        <input type="file" name="archivo" accept=".xlsx"
+                               class="form-control{% if form_experiencia.archivo.errors %} is-invalid{% endif %}"
+                               id="id_archivo_exp" required>
+                        {% if form_experiencia.archivo.errors %}
+                            <div class="invalid-feedback">{{ form_experiencia.archivo.errors.0 }}</div>
+                        {% endif %}
+                        <div class="form-text">{{ form_experiencia.archivo.help_text }}</div>
+                    </div>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-upload me-1"></i>Cargar experiencia
+                    </button>
+                </form>
+
+                {% if task_id_experiencia %}
+                <hr>
+                <div id="spinner-experiencia">
+                    <div class="d-flex align-items-center gap-2 text-secondary">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                        <span>Cargando y vectorizando experiencia...</span>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Instructions -->
+<div class="card border-0 shadow-sm mt-4">
+    <div class="card-body">
+        <h6 class="card-title"><i class="bi bi-info-circle me-1 text-info"></i>Instrucciones</h6>
+        <ol class="mb-0 small text-muted">
+            <li>Cargue primero los archivos Excel de la empresa en esta pantalla.</li>
+            <li>Espere la confirmacion de que los datos se cargaron correctamente (revise el conteo de registros).</li>
+            <li>Luego vaya a <strong>Nueva Evaluacion</strong> para subir el PDF del pliego.</li>
+        </ol>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// CSRF token helper
+function getCsrfToken() {
+    var el = document.querySelector('[name=csrfmiddlewaretoken]');
+    return el ? el.value : getCookie('csrftoken');
+}
+
+// Load DB status on page load
+function refreshDbStatus() {
+    fetch('/api/db-status/')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            document.getElementById('count-indicadores').textContent = data.indicadores || 0;
+            document.getElementById('count-experiencia').textContent = data.experiencia || 0;
+            var iconEl = document.getElementById('db-exists-icon');
+            if (data.db_exists) {
+                iconEl.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
+            } else {
+                iconEl.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
+            }
+            if (data.error) {
+                iconEl.innerHTML = '<i class="bi bi-exclamation-triangle-fill text-warning"></i>';
+                console.warn('DB status error:', data.error);
+            }
+        })
+        .catch(function(err) {
+            console.error('Error consultando db-status:', err);
+        });
+}
+
+refreshDbStatus();
+
+// Poll pending tasks if task IDs were passed from Django
+{% if task_id_indicadores %}
+pollTask(
+    '{{ task_id_indicadores }}',
+    function(result) {
+        showSuccess('spinner-indicadores', 'Indicadores cargados correctamente');
+        refreshDbStatus();
+    },
+    function(err) {
+        showError('spinner-indicadores', 'Error: ' + err);
+    }
+);
+{% endif %}
+
+{% if task_id_experiencia %}
+pollTask(
+    '{{ task_id_experiencia }}',
+    function(result) {
+        showSuccess('spinner-experiencia', 'Experiencia cargada y vectorizada correctamente');
+        refreshDbStatus();
+    },
+    function(err) {
+        showError('spinner-experiencia', 'Error: ' + err);
+    }
+);
+{% endif %}
+</script>
+{% endblock %}

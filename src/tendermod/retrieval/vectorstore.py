@@ -29,6 +29,7 @@ def create_vectorstor_from_text(document_chunks, embeddings, path = CHROMA_PERSI
         collection_name="rup",
         embedding_function=embeddings,
         persist_directory=path,
+        collection_metadata={"hnsw:space": "cosine"},
     )
 
     vectorstore.add_documents(document_chunks, ids=ids)

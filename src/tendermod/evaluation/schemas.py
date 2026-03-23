@@ -82,6 +82,10 @@ class RupExperienceResult(BaseModel):
         default=None,
         description="Score de similitud semántica con el objeto requerido (0.0-1.0). None si no aplica o no hay datos en ChromaDB."
     )
+    objeto_contrato: Optional[str] = Field(
+        default=None,
+        description="Texto del contrato con mayor similitud semántica al objeto requerido"
+    )
     cumple_total: bool = Field(description="True solo si todos los criterios evaluables son True")
 
 
@@ -107,5 +111,9 @@ class ExperienceComplianceResult(BaseModel):
     objeto_exige_relevancia: Optional[str] = Field(
         default=None,
         description="Valor extraído del pliego para el filtro de objeto (SI/NO/NO_ESPECIFICADO)"
+    )
+    similarity_threshold_usado: float = Field(
+        default=0.75,
+        description="Umbral de similitud semántica utilizado en la evaluación de objeto"
     )
     cumple: bool = Field(default=False, description="True si al menos 1 RUP cumple todos los criterios")

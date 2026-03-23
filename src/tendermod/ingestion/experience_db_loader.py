@@ -122,14 +122,10 @@ def build_chunk(record: Dict[str, Any]) -> Dict[str, Any]:
     return chunk
 
 def build_page_content(cliente, objeto, descripcion, fecha, valor, numero_rup):
-    return "\n".join([
-        f"Cliente: {cliente}",
-        f"Objeto: {objeto}",
-        f"Descripción: {descripcion}",
-        f"Fecha finalización: {fecha}",
-        f"Valor: {valor}",
-        f"Número RUP: {numero_rup}",
-    ])
+    # Solo el objeto se usa como page_content para que el embedding sea
+    # semánticamente puro al comparar contra el objeto requerido por el pliego.
+    # Los demás campos (cliente, valor, fecha) están en metadata para display.
+    return objeto
 
 def ingest_and_chunk():
     

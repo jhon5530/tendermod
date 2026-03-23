@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+{% load static %}
+{% load l10n %}
+
+{% block title %}Evaluacion Rapida{% endblock %}
+
+{% block nav_quick %}active{% endblock %}
+
+{% block content %}
+
+<div class="d-flex align-items-center gap-2 mb-1">
+    <h4 class="mb-0"><i class="bi bi-lightning-charge me-2 text-warning"></i>Evaluacion Rapida</h4>
+</div>
+<p class="text-muted mb-4">
+    Pega el texto con los requisitos directamente — sin necesidad de subir un PDF.
+    El sistema extrae y evalua los requisitos de forma automatica.
+</p>
+
+<div class="row">
+    <div class="col-md-8">
+
+        <!-- Text input card -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header card-header-tendermod">
+                <h5 class="mb-0"><i class="bi bi-textarea-t me-2"></i>Texto del Pliego</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-2">
+                    Copia y pega el fragmento del pliego que describe los requisitos habilitantes
+                    (experiencia o indicadores financieros).
+                </p>
+                <textarea
+                    id="quick-text"
+                    class="form-control font-monospace"
+                    rows="15"
+                    placeholder="Ejemplo de experiencia:
+El proponente debe acreditar experiencia en contratos con códigos UNSPSC 432217 y 432220.
+Valor mínimo a acreditar: 500 SMMLV. Se aceptan hasta 3 contratos.
+
+Ejemplo de indicadores:
+- Índice de Liquidez: mayor o igual a 1.5
+- Nivel de Endeudamiento: menor o igual a 0.60
+- Rentabilidad del Patrimonio: mayor o igual a 0.05"></textarea>
+            </div>
+        </div>
+
+        <!-- Umbral semantico -->
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body py-3">
+                <label for="umbral-rapido" class="form-label fw-semibold small mb-1">
+                    <i class="bi bi-sliders me-1"></i>Umbral semantico (solo esta evaluacion)
+                </label>
+                <div class="d-flex align-items-center gap-2">
+                    <input type="number" id="umbral-rapido" name="umbral"
+                           min="0" max="1" step="0.01"
+                           value="{% localize off %}{{ system_threshold }}{% endlocalize %}"
+                           class="form-control form-control-sm" style="max-width: 120px;">
+                    <span class="text-muted small">
+                        Umbral de similitud semantica (0.0 - 1.0).
+                        <a href="{% url 'redneet:settings' %}" class="text-muted">
+                            Umbral global: {{ system_threshold|floatformat:2 }}
+                        </a>
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Action buttons -->
+        <div class="d-flex gap-3 mb-4 flex-wrap">
+            <button
+                class="btn btn-success btn-lg"
+                id="btn-experience"
+                onclick="launchQuickEvaluation('experience')">
+                <i class="bi bi-briefcase me-2"></i>Evaluar Experiencia
+            </button>
+            <button
+                class="btn btn-primary btn-lg"
+                id="btn-indicators"
+                onclick="launchQuickEvaluation('indicators')">
+                <i class="bi bi-bar-chart-line me-2"></i>Evaluar Indicadores
+            </button>
+            <button
+                class="btn btn-outline-secondary"
+                id="btn-reset"
+                onclick="resetEvaluation()"
+                {% if not quick_session_id %}style="display:none"{% endif %}>
+                <i class="bi bi-arrow-counterclockwise me-1"></i>Nueva Evaluacion
+            </button>
+        </div>
+
+        <!-- Spinner / status area -->
+        <div id="quick-status" class="mb-4"></div>
+
+        <!-- Result area (hidden until task completes) -->
+        <div id="quick-result" class="mb-4" style="display:none">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header card-header-tendermod">
+                    <h5 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Resultado</h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex align-items-center gap-3 mb-3">
+                        <span id="result-badge" class="badge badge-cumple fs-5"></span>
+                        <span id="result-label" class="text-muted"></span>
+                    </div>
+                    <a id="result-link" href="#" class="btn btn-outline-primary" style="display:none">
+                        <i class="bi bi-eye me-1"></i>Ver Resultados Completos
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Previous session notice -->
+        {% if quick_session_id %}
+        <div class="alert alert-info alert-sm py-2 small">
+            <i class="bi bi-info-circle me-1"></i>
+            Sesion activa: #{{ quick_session_id }}.
+            <a href="{% url 'analysis:results' pk=quick_session_id %}" class="alert-link">Ver resultados anteriores</a>
+            o use "Nueva Evaluacion" para empezar desde cero.
+        </div>
+        {% endif %}
+
+    </div>
+
+    <!-- Right column: instructions -->
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body">
+                <h6 class="card-title text-muted">
+                    <i class="bi bi-question-circle me-1"></i>Como funciona
+                </h6>
+                <ol class="small text-muted ps-3 mb-0">
+                    <li class="mb-2">Pega el texto del pliego con los requisitos.</li>
+                    <li class="mb-2">
+                        Haz clic en <strong>Evaluar Experiencia</strong> para comparar codigos
+                        UNSPSC contra la base de datos RUP de la empresa.
+                    </li>
+                    <li class="mb-2">
+                        O haz clic en <strong>Evaluar Indicadores</strong> para comparar
+                        indicadores financieros contra los datos de la empresa.
+                    </li>
+                    <li>Puedes lanzar ambas evaluaciones con el mismo texto o con textos distintos.</li>
+                </ol>
+            </div>
+        </div>
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h6 class="card-title text-muted">
+                    <i class="bi bi-lightbulb me-1"></i>Diferencia con evaluacion completa
+                </h6>
+                <p class="small text-muted mb-0">
+                    La evaluacion completa requiere subir el PDF y pasa por extraccion RAG
+                    (mas precisa). La evaluacion rapida usa el texto que pegas directamente,
+                    ideal para validaciones rapidas o cuando ya tienes el texto relevante.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Hidden CSRF for AJAX -->
+{% csrf_token %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var QUICK_EVALUATE_URL = "{% url 'analysis:quick_evaluate' %}";
+var currentSessionId = {{ quick_session_id|default:"null" }};
+
+function getCSRF() {
+    var token = document.querySelector('[name=csrfmiddlewaretoken]');
+    return token ? token.value : getCookie('csrftoken');
+}
+
+function setButtonsDisabled(disabled) {
+    document.getElementById('btn-experience').disabled = disabled;
+    document.getElementById('btn-indicators').disabled = disabled;
+}
+
+function showQuickSpinner(message) {
+    var el = document.getElementById('quick-status');
+    el.innerHTML =
+        '<div class="d-flex align-items-center gap-2 text-secondary">' +
+        '<div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div>' +
+        '<span>' + (message || 'Procesando...') + '</span>' +
+        '</div>';
+}
+
+function showQuickSuccess(message) {
+    var el = document.getElementById('quick-status');
+    el.innerHTML =
+        '<div class="alert alert-success mb-0 py-2">' +
+        '<i class="bi bi-check-circle me-1"></i>' + (message || 'Completado') +
+        '</div>';
+}
+
+function showQuickError(message) {
+    var el = document.getElementById('quick-status');
+    el.innerHTML =
+        '<div class="alert alert-danger mb-0 py-2">' +
+        '<i class="bi bi-exclamation-triangle me-1"></i>' + (message || 'Error') +
+        '</div>';
+}
+
+function showResultBadge(cumple, actionLabel, sessionId) {
+    var resultDiv = document.getElementById('quick-result');
+    var badge = document.getElementById('result-badge');
+    var label = document.getElementById('result-label');
+    var link = document.getElementById('result-link');
+
+    if (cumple === true) {
+        badge.className = 'badge badge-cumple fs-5 bg-success';
+        badge.textContent = 'CUMPLE';
+    } else if (cumple === false) {
+        badge.className = 'badge badge-cumple fs-5 bg-danger';
+        badge.textContent = 'NO CUMPLE';
+    } else {
+        badge.className = 'badge badge-cumple fs-5 bg-secondary';
+        badge.textContent = 'INDETERMINADO';
+    }
+
+    label.textContent = actionLabel;
+
+    if (sessionId) {
+        link.href = '/analysis/' + sessionId + '/results/';
+        link.style.display = '';
+    }
+
+    resultDiv.style.display = '';
+}
+
+function launchQuickEvaluation(action) {
+    var text = document.getElementById('quick-text').value.trim();
+    if (!text) {
+        showQuickError('Debes pegar algun texto antes de evaluar.');
+        return;
+    }
+
+    setButtonsDisabled(true);
+    var label = action === 'experience' ? 'Evaluando experiencia...' : 'Evaluando indicadores financieros...';
+    showQuickSpinner(label);
+    document.getElementById('quick-result').style.display = 'none';
+
+    var umbralEl = document.getElementById('umbral-rapido');
+    var umbral = parseFloat(umbralEl.value);
+    if (isNaN(umbral)) umbral = parseFloat(umbralEl.defaultValue) || 0.75;
+    fetch(QUICK_EVALUATE_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCSRF(),
+        },
+        body: JSON.stringify({ action: action, text: text, umbral: umbral }),
+    })
+    .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    })
+    .then(function(data) {
+        if (data.error) throw new Error(data.error);
+
+        currentSessionId = data.session_id;
+
+        // Show reset button now that a session exists
+        document.getElementById('btn-reset').style.display = '';
+
+        var doneLabel = action === 'experience'
+            ? 'Evaluacion de experiencia completada.'
+            : 'Evaluacion de indicadores completada.';
+        var actionLabel = action === 'experience' ? 'Experiencia' : 'Indicadores financieros';
+
+        pollTask(
+            data.task_id,
+            function(result) {
+                showQuickSuccess(doneLabel);
+                setButtonsDisabled(false);
+                var cumple = (result && result.cumple !== undefined) ? result.cumple : null;
+                showResultBadge(cumple, actionLabel, currentSessionId);
+            },
+            function(errMsg) {
+                showQuickError('Error: ' + errMsg);
+                setButtonsDisabled(false);
+            }
+        );
+    })
+    .catch(function(err) {
+        showQuickError('Error al lanzar la evaluacion: ' + err.message);
+        setButtonsDisabled(false);
+    });
+}
+
+function resetEvaluation() {
+    fetch(QUICK_EVALUATE_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCSRF(),
+        },
+        body: JSON.stringify({ action: 'reset' }),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function() {
+        currentSessionId = null;
+        document.getElementById('quick-text').value = '';
+        document.getElementById('quick-status').innerHTML = '';
+        document.getElementById('quick-result').style.display = 'none';
+        document.getElementById('btn-reset').style.display = 'none';
+        setButtonsDisabled(false);
+    })
+    .catch(function(err) {
+        showQuickError('Error al reiniciar: ' + err.message);
+    });
+}
+</script>
+{% endblock %}

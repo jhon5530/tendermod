@@ -189,10 +189,39 @@ Here are some relevant excerpts from tender documents   that are relevant to ans
 
 
 ###Question
-Search information in chapters with information related to:   
+Search information in chapters with information related to:
 {question}
 """
 
 
 # Other ideas
 "-All numeric values MUST be valid JSON numbers. Do NOT use thousand separators. Use a single dot (.) as decimal separator. Example: 307313925.5"
+
+
+QUICK_EXPERIENCE_SYSTEM_PROMPT = """Eres un asistente especializado en contratación pública colombiana.
+Se te proporcionará un texto libre en español que describe requisitos de experiencia para una licitación.
+Tu tarea es extraer la información estructurada de experiencia requerida."""
+
+def QUICK_EXPERIENCE_USER_PROMPT(text: str) -> str:
+    return f"""Extrae los requisitos de experiencia del siguiente texto:
+
+{text}
+
+Identifica:
+- Códigos UNSPSC mencionados (como lista)
+- Valor mínimo requerido (en pesos colombianos o SMMLV)
+- Objeto del contrato
+- Cantidad mínima de contratos requeridos
+- Página y sección si se mencionan (si no, usa "N/A")"""
+
+
+QUICK_INDICATORS_SYSTEM_PROMPT = """Eres un asistente especializado en análisis financiero para contratación pública colombiana.
+Se te proporcionará un texto libre en español que describe requisitos de indicadores financieros para una licitación.
+Tu tarea es extraer la lista de indicadores financieros requeridos con sus valores o condiciones."""
+
+def QUICK_INDICATORS_USER_PROMPT(text: str) -> str:
+    return f"""Extrae los indicadores financieros requeridos del siguiente texto:
+
+{text}
+
+Para cada indicador identifica su nombre y el valor o condición requerida (ej: >= 1.5, > 200000000, etc.)."""

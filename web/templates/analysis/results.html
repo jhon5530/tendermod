@@ -1,0 +1,343 @@
+{% extends "base.html" %}
+{% load static %}
+{% load currency_filters %}
+
+{% block title %}Resultados — Sesion {{ session.pk }}{% endblock %}
+
+{% block content %}
+
+<!-- Stepper -->
+<div class="d-flex align-items-center gap-2 mb-4">
+    <span class="step-badge bg-success text-white"><i class="bi bi-check"></i></span>
+    <span class="text-muted">Subir PDF</span>
+    <div class="flex-grow-1 border-top mx-2"></div>
+    <span class="step-badge bg-success text-white"><i class="bi bi-check"></i></span>
+    <span class="text-muted">Extraer requisitos</span>
+    <div class="flex-grow-1 border-top mx-2"></div>
+    <span class="step-badge bg-success text-white"><i class="bi bi-check"></i></span>
+    <span class="text-muted">Validar y evaluar</span>
+    <div class="flex-grow-1 border-top mx-2"></div>
+    <span class="step-badge bg-success text-white"><i class="bi bi-check"></i></span>
+    <span class="fw-semibold text-success">Resultados</span>
+</div>
+
+<!-- Header -->
+<div class="d-flex justify-content-between align-items-start mb-4">
+    <div>
+        <h4 class="mb-1">Resultados de Evaluacion</h4>
+        <p class="text-muted mb-0">
+            <i class="bi bi-file-earmark-pdf me-1 text-danger"></i>
+            <strong>{{ session.pdf_filename }}</strong>
+            &nbsp;&bull;&nbsp; Sesion #{{ session.pk }}
+            &nbsp;&bull;&nbsp;
+            <span class="text-muted small">{{ session.created_at|date:"d/m/Y H:i" }}</span>
+        </p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{% url 'analysis:export_excel' pk=session.pk %}" class="btn btn-outline-success btn-sm">
+            <i class="bi bi-file-earmark-spreadsheet me-1"></i>Descargar Excel
+        </a>
+        <a href="{% url 'analysis:export_text' pk=session.pk %}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-file-earmark-text me-1"></i>Descargar TXT
+        </a>
+        <a href="{% url 'analysis:step2' pk=session.pk %}" class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-pencil me-1"></i>Editar evaluacion
+        </a>
+    </div>
+</div>
+
+<!-- No results yet -->
+{% if not result %}
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle me-2"></i>
+    Aun no hay resultados para esta sesion.
+    <a href="{% url 'analysis:step2' pk=session.pk %}">Lance la evaluacion desde el Paso 2.</a>
+</div>
+{% else %}
+
+<!-- Veredicto final -->
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm h-100 text-center">
+            <div class="card-body d-flex flex-column align-items-center justify-content-center py-4">
+                <p class="text-muted small mb-2">VEREDICTO FINAL</p>
+                {% if result.cumple_final is None %}
+                    <span class="badge bg-secondary badge-cumple">INDETERMINADO</span>
+                    <p class="text-muted small mt-2 mb-0">Faltan evaluaciones.</p>
+                {% elif result.cumple_final %}
+                    <span class="badge bg-success badge-cumple">CUMPLE</span>
+                    <p class="text-success small mt-2 mb-0">La empresa cumple todos los requisitos evaluados.</p>
+                {% else %}
+                    <span class="badge bg-danger badge-cumple">NO CUMPLE</span>
+                    <p class="text-danger small mt-2 mb-0">La empresa no cumple uno o mas requisitos.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm h-100 text-center">
+            <div class="card-body d-flex flex-column align-items-center justify-content-center py-4">
+                <p class="text-muted small mb-2"><i class="bi bi-briefcase me-1"></i>EXPERIENCIA RUP</p>
+                {% if result.cumple_experiencia is None %}
+                    <span class="badge bg-secondary badge-cumple">Sin evaluar</span>
+                {% elif result.cumple_experiencia %}
+                    <span class="badge bg-success badge-cumple">CUMPLE</span>
+                {% else %}
+                    <span class="badge bg-danger badge-cumple">NO CUMPLE</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm h-100 text-center">
+            <div class="card-body d-flex flex-column align-items-center justify-content-center py-4">
+                <p class="text-muted small mb-2"><i class="bi bi-bar-chart-line me-1"></i>INDICADORES FINANCIEROS</p>
+                {% if result.cumple_indicadores is None %}
+                    <span class="badge bg-secondary badge-cumple">Sin evaluar</span>
+                {% elif result.cumple_indicadores %}
+                    <span class="badge bg-success badge-cumple">CUMPLE</span>
+                {% else %}
+                    <span class="badge bg-danger badge-cumple">NO CUMPLE</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Experiencia RUP detail -->
+{% if exp_result %}
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header card-header-tendermod d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-briefcase me-2"></i>Detalle de Experiencia RUP</h5>
+        {% if exp_result.cumple %}
+            <span class="badge bg-success">CUMPLE</span>
+        {% else %}
+            <span class="badge bg-danger">NO CUMPLE</span>
+        {% endif %}
+    </div>
+    <div class="card-body">
+
+        <!-- Summary metrics -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="p-3 bg-light rounded text-center">
+                    <div class="text-muted small mb-1">Codigos UNSPSC requeridos</div>
+                    <div class="fw-bold">{{ exp_result.codigos_requeridos|join:", " }}</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="p-3 bg-light rounded text-center">
+                    <div class="text-muted small mb-1">Valor requerido (COP)</div>
+                    {% if exp_result.valor_requerido_cop %}
+                        <div class="fw-bold">{{ exp_result.valor_requerido_cop|currency_cop }}</div>
+                    {% else %}
+                        <div class="text-muted">No especificado</div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="p-3 bg-light rounded text-center">
+                    <div class="text-muted small mb-1">Total valor acreditado (COP)</div>
+                    {% if exp_result.total_valor_cop %}
+                        <div class="fw-bold text-success">{{ exp_result.total_valor_cop|currency_cop }}</div>
+                    {% else %}
+                        <div class="text-muted">N/A</div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="p-3 bg-light rounded text-center">
+                    <div class="text-muted small mb-1">RUPs candidatos (codigos)</div>
+                    <div class="fw-bold">{{ exp_result.rups_candidatos_codigos|length }}</div>
+                </div>
+            </div>
+        </div>
+
+        {% if exp_result.objeto_requerido %}
+        <div class="alert alert-light border mb-3">
+            <strong>Objeto requerido:</strong> {{ exp_result.objeto_requerido }}
+            &nbsp;&bull;&nbsp;
+            <span class="text-muted small">Exige relevancia: {{ exp_result.objeto_exige_relevancia }}</span>
+        </div>
+        {% endif %}
+
+        <!-- RUPs table -->
+        {% if exp_result.rups_evaluados %}
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm align-middle mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th>NUMERO RUP</th>
+                        <th>Cliente</th>
+                        <th class="text-end">Valor COP</th>
+                        <th class="text-center">Cod. UNSPSC</th>
+                        <th class="text-center">Valor</th>
+                        <th class="text-center">Objeto</th>
+                        <th class="text-center">Score Obj.</th>
+                        <th class="text-center">Resultado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rup in exp_result.rups_evaluados %}
+                    <tr {% if rup.cumple_total %}class="table-success"{% else %}class="table-danger"{% endif %}>
+                        <td><strong>{{ rup.numero_rup }}</strong></td>
+                        <td>{{ rup.cliente|default:"N/A" }}</td>
+                        <td class="text-end">
+                            {% if rup.valor_cop %}
+                                {{ rup.valor_cop|currency_cop }}
+                            {% else %}
+                                <span class="text-muted">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if rup.cumple_codigos %}
+                                <span class="badge bg-success">SI</span>
+                            {% else %}
+                                <span class="badge bg-danger">NO</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if rup.cumple_valor is None %}
+                                <span class="badge bg-secondary">N/A</span>
+                            {% elif rup.cumple_valor %}
+                                <span class="badge bg-success">SI</span>
+                            {% else %}
+                                <span class="badge bg-danger">NO</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if rup.cumple_objeto is None %}
+                                <span class="badge bg-secondary">N/A</span>
+                            {% elif rup.cumple_objeto %}
+                                <span class="badge bg-success">SI</span>
+                            {% else %}
+                                <span class="badge bg-danger">NO</span>
+                                <div class="text-danger small mt-1" style="font-size:0.7rem">
+                                    {% if rup.score_objeto is None %}
+                                        ChromaDB sin datos
+                                    {% else %}
+                                        Score {{ rup.score_objeto|floatformat:3 }} &lt; umbral {{ exp_result.similarity_threshold_usado }}
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if rup.score_objeto is not None %}
+                                <div class="fw-bold fs-6">{{ rup.score_objeto|floatformat:3 }}</div>
+                                {% if rup.score_objeto >= exp_result.similarity_threshold_usado %}
+                                    <span class="badge bg-success">SUPERA</span>
+                                {% else %}
+                                    <span class="badge bg-warning text-dark">BAJO</span>
+                                {% endif %}
+                                {% if rup.objeto_contrato %}
+                                <button class="btn btn-link btn-sm p-0 mt-1 text-muted"
+                                        data-bs-toggle="collapse"
+                                        data-bs-target="#obj-detail-{{ rup.numero_rup }}"
+                                        title="Ver detalle de objeto">
+                                    <i class="bi bi-info-circle"></i>
+                                </button>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if rup.cumple_total %}
+                                <span class="badge bg-success">CUMPLE</span>
+                            {% else %}
+                                <span class="badge bg-danger">NO CUMPLE</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% if rup.objeto_contrato %}
+                    <tr class="collapse bg-light" id="obj-detail-{{ rup.numero_rup }}">
+                        <td colspan="8" class="px-4 py-2">
+                            <div class="mb-1">
+                                <span class="fw-semibold text-secondary small">Objeto buscado:</span>
+                                <span class="ms-1 small">{{ exp_result.objeto_requerido }}</span>
+                            </div>
+                            <div>
+                                <span class="fw-semibold text-secondary small">Contrato elegido (score {{ rup.score_objeto|floatformat:3 }}):</span>
+                                <span class="ms-1 small">{{ rup.objeto_contrato }}</span>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {% if exp_result.rups_excluidos_por_objeto %}
+        <div class="alert alert-warning mt-3 small mb-0">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            <strong>RUPs excluidos por objeto:</strong>
+            {{ exp_result.rups_excluidos_por_objeto|join:", " }}
+            &nbsp;&bull;&nbsp;
+            <span class="text-muted">Umbral usado: {{ exp_result.similarity_threshold_usado }}</span>
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+{% endif %}
+
+<!-- Indicadores detail -->
+{% if ind_result %}
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header card-header-tendermod d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-bar-chart-line me-2"></i>Detalle de Indicadores Financieros</h5>
+        {% if ind_result.cumple is None %}
+            <span class="badge bg-secondary">INDETERMINADO</span>
+        {% elif ind_result.cumple %}
+            <span class="badge bg-success">CUMPLE</span>
+        {% else %}
+            <span class="badge bg-danger">NO CUMPLE</span>
+        {% endif %}
+    </div>
+    <div class="card-body">
+
+        {% if ind_result.indicadores_evaluados %}
+        <div class="mb-3">
+            <strong>Indicadores evaluados:</strong>
+            <div class="d-flex flex-wrap gap-1 mt-1">
+                {% for nombre in ind_result.indicadores_evaluados %}
+                    <span class="badge bg-light text-dark border">{{ nombre }}</span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if ind_result.indicadores_faltantes %}
+        <div class="alert alert-warning small mb-3">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            <strong>Indicadores sin datos en SQLite:</strong>
+            {{ ind_result.indicadores_faltantes|join:", " }}
+        </div>
+        {% endif %}
+
+        <div class="card bg-light border-0">
+            <div class="card-body">
+                <h6 class="card-title text-muted small text-uppercase">Argumentacion del LLM</h6>
+                <div class="small" style="white-space: pre-wrap;">{{ ind_result.detalle }}</div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endif %}
+
+{% endif %}{# end if result #}
+
+<!-- Bottom navigation -->
+<div class="d-flex justify-content-between align-items-center mt-2">
+    <a href="{% url 'analysis:step2' pk=session.pk %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Volver al Paso 2
+    </a>
+    <a href="{% url 'analysis:list' %}" class="btn btn-outline-primary">
+        <i class="bi bi-list-ul me-1"></i>Ver historial
+    </a>
+</div>
+
+{% endblock %}

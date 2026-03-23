@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Configuraciones del Sistema{% endblock %}
+{% block nav_redneet %}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-sliders me-2 text-primary"></i>Configuraciones del Sistema</h2>
+        <p class="text-muted mb-0">Ajuste los parametros por defecto que se usaran en las evaluaciones.</p>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-md-6">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header card-header-tendermod">
+                <h5 class="mb-0"><i class="bi bi-funnel me-2"></i>Filtro Semantico de Objeto</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    Umbral de similitud semantica para la validacion de objeto del contrato.
+                    Cuando el pliego exige relevancia del objeto (<code>objeto_exige_relevancia = SI</code>),
+                    solo se aprueban los RUPs cuyo contrato supere este umbral al compararse con el objeto
+                    requerido. Valor entre 0.0 y 1.0 (por defecto del sistema: 0.75).
+                </p>
+
+                <div class="alert alert-info d-flex align-items-center gap-2 mb-3 py-2">
+                    <i class="bi bi-info-circle-fill"></i>
+                    <span>Valor actual configurado: <strong>{{ config.threshold_objeto|floatformat:2 }}</strong></span>
+                </div>
+
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-4">
+                        <label for="threshold_objeto" class="form-label fw-semibold">
+                            Umbral de similitud semantica
+                        </label>
+                        <div class="input-group" style="max-width: 240px;">
+                            <input
+                                type="number"
+                                id="threshold_objeto"
+                                name="threshold_objeto"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                value="{{ config.threshold_objeto }}"
+                                class="form-control"
+                                required>
+                            <span class="input-group-text text-muted">(0.0 — 1.0)</span>
+                        </div>
+                        <div class="form-text">
+                            Umbral de similitud semantica para validacion de objeto.
+                            Valor por defecto del sistema (0.0 - 1.0). Este valor puede sobreescribirse
+                            por evaluacion individual desde el formulario de evaluacion.
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-floppy me-1"></i>Guardar configuracion
+                    </button>
+                    <a href="{% url 'redneet:dashboard' %}" class="btn btn-outline-secondary ms-2">
+                        Cancelar
+                    </a>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h6 class="card-title text-muted">
+                    <i class="bi bi-question-circle me-1"></i>Referencia rapida
+                </h6>
+                <table class="table table-sm table-bordered small mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Umbral</th>
+                            <th>Comportamiento</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>0.90 — 1.00</code></td>
+                            <td>Muy estricto: solo contratos con objeto casi identico</td>
+                        </tr>
+                        <tr>
+                            <td><code>0.75</code></td>
+                            <td>Por defecto: contratos con alta similitud semantica</td>
+                        </tr>
+                        <tr>
+                            <td><code>0.60 — 0.74</code></td>
+                            <td>Moderado: acepta objetos relacionados con menor precision</td>
+                        </tr>
+                        <tr>
+                            <td><code>0.00 — 0.59</code></td>
+                            <td>Permisivo: filtra muy poco (no recomendado)</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p class="text-muted small mt-3 mb-0">
+                    El umbral solo aplica cuando el pliego exige relevancia del objeto
+                    (<strong>objeto_exige_relevancia = SI</strong>). Si el pliego no lo exige,
+                    el score se calcula solo para auditoria pero no excluye ningun RUP.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

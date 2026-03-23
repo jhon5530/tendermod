@@ -1,0 +1,158 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}tendermod{% endblock %} — Evaluador de Licitaciones</title>
+
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .navbar-brand {
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+        .sidebar {
+            min-height: calc(100vh - 56px);
+            background-color: #fff;
+            border-right: 1px solid #dee2e6;
+        }
+        .sidebar .nav-link {
+            color: #495057;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            margin-bottom: 2px;
+        }
+        .sidebar .nav-link:hover,
+        .sidebar .nav-link.active {
+            background-color: #e9ecef;
+            color: #0d6efd;
+        }
+        .sidebar .nav-link i {
+            width: 1.2rem;
+        }
+        .step-badge {
+            width: 2rem;
+            height: 2rem;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.85rem;
+        }
+        .card-header-tendermod {
+            background-color: #1F4E79;
+            color: white;
+        }
+        .badge-cumple {
+            font-size: 1rem;
+            padding: 0.4rem 0.8rem;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+    </style>
+
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="/">
+            <i class="bi bi-file-earmark-check me-1"></i>tendermod
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav ms-auto">
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'redneet:dashboard' %}">
+                        <i class="bi bi-database me-1"></i>Datos Empresa
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'analysis:new' %}">
+                        <i class="bi bi-plus-circle me-1"></i>Nueva Evaluacion
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'analysis:list' %}">
+                        <i class="bi bi-list-ul me-1"></i>Historial
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<!-- Main layout -->
+<div class="container-fluid">
+    <div class="row">
+        <!-- Sidebar -->
+        <nav class="col-md-2 d-none d-md-block sidebar py-3">
+            <div class="d-flex flex-column gap-1">
+                <p class="text-muted small text-uppercase fw-bold px-2 mb-1">Empresa</p>
+                <a class="nav-link {% block nav_redneet %}{% endblock %}"
+                   href="{% url 'redneet:dashboard' %}">
+                    <i class="bi bi-database me-1"></i>Datos Redneet
+                </a>
+                <a class="nav-link {% if request.resolver_match.url_name == 'settings' %}active{% endif %}"
+                   href="{% url 'redneet:settings' %}">
+                    <i class="bi bi-sliders me-1"></i>Configuraciones
+                </a>
+                <hr class="my-2">
+                <p class="text-muted small text-uppercase fw-bold px-2 mb-1">Analisis</p>
+                <a class="nav-link {% block nav_new %}{% endblock %}"
+                   href="{% url 'analysis:new' %}">
+                    <i class="bi bi-plus-circle me-1"></i>Nueva Evaluacion
+                </a>
+                <a class="nav-link {% block nav_quick %}{% endblock %}"
+                   href="{% url 'analysis:quick' %}">
+                    <i class="bi bi-lightning me-1"></i>Evaluacion Rapida
+                </a>
+                <a class="nav-link {% block nav_list %}{% endblock %}"
+                   href="{% url 'analysis:list' %}">
+                    <i class="bi bi-list-ul me-1"></i>Historial
+                </a>
+            </div>
+        </nav>
+
+        <!-- Content -->
+        <main class="col-md-10 ms-sm-auto px-md-4 py-3">
+            <!-- Messages -->
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</div>
+
+<!-- Bootstrap 5 JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<!-- task_polling.js -->
+<script src="{% static 'js/task_polling.js' %}"></script>
+
+{% block extra_js %}{% endblock %}
+</body>
+</html>

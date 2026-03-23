@@ -320,15 +320,13 @@ def filter_rups_by_object(
             resultado final. None significa "sin datos en ChromaDB".
     """
     if not objeto_requerido or objeto_requerido.strip() in ("None", ""):
-        return rups, {}
+        return rups, {}, {}
     if re.search(
         r'no specific purpose|cannot find|no se encontr|not found|no especif',
         objeto_requerido,
         re.IGNORECASE,
     ):
-        return rups, {}
-
-    k_dinamico = max(20, len(rups) * 4)
+        return rups, {}, {}
 
     try:
         vectorstore = read_vectorstore(
@@ -336,6 +334,15 @@ def filter_rups_by_object(
             path=CHROMA_EXPERIENCE_PERSIST_DIR,
             collection_name="rup",
         )
+        try:
+            total_docs = vectorstore._collection.count()
+            # Usar total_docs para garantizar que si un RUP tiene datos en ChromaDB,
+            # SIEMPRE aparecerá en results con su score real.
+            # Con k < total_docs, un RUP disímil puede no aparecer y recibir score=None,
+            # lo cual la política conservadora trata como "sin datos" → CUMPLE incorrectamente.
+            k_dinamico = total_docs if total_docs > 0 else max(20, len(rups) * 4)
+        except Exception:
+            k_dinamico = max(200, len(rups) * 10)
         results = vectorstore.similarity_search_with_relevance_scores(
             objeto_requerido, k=k_dinamico
         )
@@ -344,10 +351,11 @@ def filter_rups_by_object(
             f"ADVERTENCIA CRITICA: No se pudo consultar ChromaDB de experiencia "
             f"para el filtro de objeto. Se omite el filtro. Error: {e}"
         )
-        return rups, {}
+        return rups, {}, {}
 
     # Agrupar scores por numero_rup → tomar el máximo por contrato
     scores_por_rup: dict = {}
+    objetos_por_rup: dict = {}
     for doc, score in results:
         raw_key = doc.metadata.get("numero_rup")
         if raw_key is None:
@@ -357,14 +365,16 @@ def filter_rups_by_object(
         except (TypeError, ValueError):
             rup_key = raw_key
         clamped = max(0.0, min(1.0, score))
-        scores_por_rup[rup_key] = max(scores_por_rup.get(rup_key, 0.0), clamped)
+        if clamped > scores_por_rup.get(rup_key, -1.0):
+            scores_por_rup[rup_key] = clamped
+            objetos_por_rup[rup_key] = doc.page_content
 
     if not scores_por_rup:
         print(
             "ADVERTENCIA CRITICA: ChromaDB de experiencia no devolvió resultados "
             "para el objeto requerido. Se omite el filtro de objeto."
         )
-        return rups, {}
+        return rups, {}, {}
 
     rups_aprobados = []
     for rup in rups:
@@ -385,10 +395,13 @@ def filter_rups_by_object(
                 f"[filter_rups_by_object] RUP {rup}: score={score:.3f} < {similarity_threshold} → EXCLUIDO por objeto"
             )
 
-    return rups_aprobados, scores_por_rup
+    return rups_aprobados, scores_por_rup, objetos_por_rup
 
 
-def check_compliance_experience(tender_experience: ExperienceResponse) -> ExperienceComplianceResult:
+def check_compliance_experience(
+    tender_experience: ExperienceResponse,
+    similarity_threshold: float = 0.75,
+) -> ExperienceComplianceResult:
     raw_codes = tender_experience.listado_codigos
 
     if not raw_codes:
@@ -430,26 +443,18 @@ def check_compliance_experience(tender_experience: ExperienceResponse) -> Experi
             cumple=False
         )
 
-    # --- FASE 1: Seleccionar top-N contratos por valor ---
-    # La regla real del pliego es acreditar con los N contratos de mayor valor,
-    # no con el universo completo de contratos que cumplen los códigos.
+    # --- Parámetros compartidos por FASE 1 y FASE 2 ---
     cantidad_n = parse_cantidad_contratos(getattr(tender_experience, 'cantidad_contratos', None))
     print(f"Cantidad de contratos requerida: {cantidad_n} (None = sin límite)")
 
-    rups_top_n = select_top_n_rups(rups_codigos, cantidad_n)
-    print(f"[Fase 1] RUPs top-{cantidad_n} por valor: {rups_top_n}")
-
-    # --- FASE 2: Filtro semántico por objeto del proceso ---
-    # Solo se aplica si el pliego exige explícitamente que la experiencia sea
-    # relacionada con el objeto del proceso. Si el filtro no se activa, los
-    # scores se calculan igualmente para trazabilidad pero no excluyen RUPs.
     objeto_exige_relevancia = getattr(
         tender_experience, 'objeto_exige_relevancia', 'NO_ESPECIFICADO'
     )
     objeto = tender_experience.objeto
-    print(f"[Fase 2] objeto_exige_relevancia={objeto_exige_relevancia} | objeto='{objeto}'")
+    print(f"objeto_exige_relevancia={objeto_exige_relevancia} | objeto='{objeto}'")
 
     scores_objeto: dict = {}
+    objetos_objeto: dict = {}
     rups_excluidos: list = []
 
     objeto_definido = (
@@ -463,17 +468,38 @@ def check_compliance_experience(tender_experience: ExperienceResponse) -> Experi
     )
 
     if objeto_exige_relevancia == "SI" and objeto_definido:
-        # Filtro activo: excluir RUPs que no superen el umbral semántico
-        rups_filtrados, scores_objeto = filter_rups_by_object(rups_top_n, objeto)
-        rups_excluidos = [r for r in rups_top_n if r not in rups_filtrados]
+        # Filtro activo: aplicar semántico ANTES de top-N para no descartar
+        # candidatos relevantes de menor valor.
+        # FASE 2 primero → FASE 1 sobre los que pasan el filtro
+        rups_semanticos, scores_objeto, objetos_objeto = filter_rups_by_object(rups_codigos, objeto, similarity_threshold)
+
+        if not scores_objeto and rups_codigos:
+            # ChromaDB vacío con filtro activo → no se puede verificar → excluir todos
+            print(
+                "ERROR [Fase 2]: Filtro de objeto ACTIVO pero ChromaDB de experiencia "
+                "no devolvió datos. Todos los RUPs quedan excluidos. "
+                "Ejecute ingest_experience_data() para poblar el vector store."
+            )
+            rups_excluidos = list(rups_codigos)
+            rups_semanticos = []
+        else:
+            rups_excluidos = [r for r in rups_codigos if r not in rups_semanticos]
+
         if rups_excluidos:
             print(f"[Fase 2] RUPs excluidos por objeto: {rups_excluidos}")
+
+        # FASE 1: top-N por valor sobre los que superaron el filtro semántico
+        rups_top_n = select_top_n_rups(rups_semanticos, cantidad_n)
+        print(f"[Fase 1] RUPs top-{cantidad_n} por valor (post-semántico): {rups_top_n}")
+        rups_filtrados = rups_top_n
     else:
-        # Filtro inactivo: conservar todo el pool
+        # Filtro inactivo: FASE 1 primero (top-N por valor), luego scores para auditoría
+        rups_top_n = select_top_n_rups(rups_codigos, cantidad_n)
+        print(f"[Fase 1] RUPs top-{cantidad_n} por valor: {rups_top_n}")
         rups_filtrados = rups_top_n
         if objeto_definido:
             # Calcular scores de todas formas para auditoría (no excluye)
-            _, scores_objeto = filter_rups_by_object(rups_top_n, objeto)
+            _, scores_objeto, objetos_objeto = filter_rups_by_object(rups_top_n, objeto, similarity_threshold)
             print(
                 f"[Fase 2] Filtro inactivo ({objeto_exige_relevancia}). "
                 f"Scores calculados para auditoría: {scores_objeto}"
@@ -494,8 +520,9 @@ def check_compliance_experience(tender_experience: ExperienceResponse) -> Experi
         else None
     )
 
-    # Obtener detalles (CLIENTE, VALOR) de los RUPs filtrados
-    rup_details = get_rup_details(rups_filtrados)
+    # Obtener detalles (CLIENTE, VALOR) de todos los RUPs del top-N para display,
+    # independientemente de si pasaron el filtro de objeto.
+    rup_details = get_rup_details(rups_top_n)
 
     # Calcular total COP de los RUPs que pasaron el filtro de objeto
     total_valor_cop = sum(
@@ -516,7 +543,7 @@ def check_compliance_experience(tender_experience: ExperienceResponse) -> Experi
             elif score_obj is None:
                 cumple_objeto = None   # sin datos en ChromaDB → conservado
             else:
-                cumple_objeto = score_obj >= 0.75
+                cumple_objeto = score_obj >= similarity_threshold
         else:
             # Filtro no activo → no se puede afirmar True/False, solo anotar score
             cumple_objeto = None
@@ -535,10 +562,44 @@ def check_compliance_experience(tender_experience: ExperienceResponse) -> Experi
             cumple_valor=cumple_valor_global,
             cumple_objeto=cumple_objeto,
             score_objeto=score_obj,
+            objeto_contrato=objetos_objeto.get(rup),
             cumple_total=cumple_total
         ))
 
     rups_cumplen = [r.numero_rup for r in rups_evaluados if r.cumple_total]
+
+    # --- Top-10 RUPs excluidos por objeto (solo cuando el filtro estuvo activo) ---
+    # Muestra los mejores candidatos descartados para trazabilidad y revisión humana.
+    if objeto_exige_relevancia == "SI" and objeto_definido and rups_excluidos:
+        # Ordenar excluidos por score descendente (score None al final)
+        excluidos_con_score = [
+            (rup, scores_objeto.get(rup))
+            for rup in rups_excluidos
+        ]
+        excluidos_con_score.sort(
+            key=lambda x: x[1] if x[1] is not None else -1.0,
+            reverse=True,
+        )
+        top10_excluidos = excluidos_con_score[:10]
+
+        # Obtener detalles de DB para los excluidos que aún no están en rup_details
+        excluidos_sin_detalle = [r for r, _ in top10_excluidos if r not in rup_details]
+        if excluidos_sin_detalle:
+            rup_details.update(get_rup_details(excluidos_sin_detalle))
+
+        for rup, score_obj in top10_excluidos:
+            detalles = rup_details.get(rup, {})
+            rups_evaluados.append(RupExperienceResult(
+                numero_rup=rup,
+                cliente=detalles.get("cliente"),
+                valor_cop=detalles.get("valor_cop"),
+                cumple_codigos=True,
+                cumple_valor=None,
+                cumple_objeto=False,
+                score_objeto=score_obj,
+                objeto_contrato=objetos_objeto.get(rup),
+                cumple_total=False,
+            ))
 
     return ExperienceComplianceResult(
         codigos_requeridos=codes,
@@ -551,6 +612,7 @@ def check_compliance_experience(tender_experience: ExperienceResponse) -> Experi
         total_valor_cop=total_valor_cop,
         rups_excluidos_por_objeto=rups_excluidos,
         objeto_exige_relevancia=objeto_exige_relevancia,
+        similarity_threshold_usado=similarity_threshold,
         cumple=len(rups_cumplen) > 0
     )
 

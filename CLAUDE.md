@@ -181,15 +181,16 @@ ENV=local
 - RAG sobre PDF para extraer requisitos de experiencia
 - Comparacion de indicadores via SQL Agent + LLM
 - Validacion de experiencia por codigos UNSPSC contra SQLite
+- Validacion de objeto/descripcion por similitud semantica (ChromaDB, umbral 0.75)
+- Campo `objeto_contrato` en `RupExperienceResult` para trazabilidad del contrato elegido
+- Exportacion TXT con detalle completo por RUP (score, contrato elegido, campos globales)
+- Exportacion Excel con columna `Contrato Elegido` en hoja Experiencia RUP
+- Interfaz web Django (MVP) en `web/` con evaluacion rapida y resultados
 
 ### Pendiente (TODOs identificados en el codigo)
-- `compare_experience.py`: validar valor a acreditar de la experiencia
-- `compare_experience.py`: validar objeto/descripcion de la experiencia
+- `compare_experience.py`: validar valor total a acreditar de la experiencia (campo `valor_requerido_cop`)
 - `main.py`: la funcion `indicators_routine()` referencia `evaluate_indicators_compliance` que no existe (codigo legacy)
 - Mejorar separacion de `CHROMA_PERSIST_DIR` y `CHROMA_EXPERIENCE_PERSIST_DIR` en settings
-
-### Archivo actualmente modificado (git status)
-- `src/tendermod/evaluation/compare_experience.py` — cambios sin commitear
 
 ---
 

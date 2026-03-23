@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+{% load static %}
+{% load l10n %}
+
+{% block title %}Paso 2 — Validacion y Evaluacion{% endblock %}
+
+{% block content %}
+
+<!-- Stepper -->
+<div class="d-flex align-items-center gap-2 mb-4">
+    <span class="step-badge bg-success text-white"><i class="bi bi-check"></i></span>
+    <span class="text-muted">Subir PDF</span>
+    <div class="flex-grow-1 border-top mx-2"></div>
+    <span class="step-badge bg-success text-white"><i class="bi bi-check"></i></span>
+    <span class="text-muted">Extraer requisitos</span>
+    <div class="flex-grow-1 border-top mx-2"></div>
+    <span class="step-badge bg-primary text-white">3</span>
+    <span class="fw-semibold text-primary">Validar y evaluar</span>
+    <div class="flex-grow-1 border-top mx-2"></div>
+    <span class="step-badge bg-light text-muted border">4</span>
+    <span class="text-muted">Resultados</span>
+</div>
+
+<div class="d-flex align-items-center gap-3 mb-4">
+    <div>
+        <h4 class="mb-1">Paso 2 — Validacion Humana y Evaluacion</h4>
+        <p class="text-muted mb-0">
+            <i class="bi bi-file-earmark-pdf me-1 text-danger"></i>
+            <strong>{{ session.pdf_filename }}</strong>
+            &nbsp;&bull;&nbsp;
+            <span class="badge bg-{{ session.status_display_class }}">
+                {{ session.get_status_display }}
+            </span>
+        </p>
+    </div>
+</div>
+
+<!-- Hidden CSRF for AJAX -->
+{% csrf_token %}
+
+<div class="row g-4">
+
+    <!-- Form A: Experiencia -->
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header card-header-tendermod d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-briefcase me-2"></i>Form A — Requisitos de Experiencia</h5>
+                {% if not session.experience_requirements_json %}
+                    <span class="badge bg-warning text-dark">
+                        <i class="bi bi-exclamation-triangle me-1"></i>Sin datos — regrese al Paso 1
+                    </span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                {% if session.experience_requirements_json %}
+                    <p class="text-muted small mb-3">
+                        Revise y corrija los requisitos de experiencia extraidos por el LLM antes de evaluar.
+                        Los campos editables son los que el sistema usara en la comparacion.
+                    </p>
+                    <form id="form-experience">
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label fw-semibold">{{ exp_form.listado_codigos.label }}</label>
+                                {{ exp_form.listado_codigos }}
+                                <div class="form-text">{{ exp_form.listado_codigos.help_text }}</div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-semibold">{{ exp_form.cantidad_codigos.label }}</label>
+                                {{ exp_form.cantidad_codigos }}
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-semibold">{{ exp_form.cantidad_contratos.label }}</label>
+                                {{ exp_form.cantidad_contratos }}
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-semibold">{{ exp_form.valor.label }}</label>
+                                {{ exp_form.valor }}
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label fw-semibold">{{ exp_form.objeto.label }}</label>
+                                {{ exp_form.objeto }}
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-semibold">{{ exp_form.pagina.label }}</label>
+                                {{ exp_form.pagina }}
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-semibold">{{ exp_form.seccion.label }}</label>
+                                {{ exp_form.seccion }}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">{{ exp_form.regla_codigos.label }}</label>
+                                {{ exp_form.regla_codigos }}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">{{ exp_form.objeto_exige_relevancia.label }}</label>
+                                {{ exp_form.objeto_exige_relevancia }}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold small">
+                                    Umbral semantico
+                                    <span class="badge bg-secondary fw-normal ms-1">Global: {{ system_threshold|floatformat:2 }}</span>
+                                </label>
+                                <input type="number" id="umbral-experiencia" name="umbral"
+                                       min="0" max="1" step="0.01"
+                                       value="{% localize off %}{{ system_threshold }}{% endlocalize %}"
+                                       class="form-control">
+                                <div class="form-text">Sobreescribe el umbral global por esta evaluacion (0.0 - 1.0). Configurar en <a href="{% url 'redneet:settings' %}">Configuraciones</a>.</div>
+                            </div>
+                        </div>
+                        <div class="mt-4 d-flex align-items-center gap-3">
+                            <button type="button" class="btn btn-success btn-lg"
+                                    onclick="evaluateExperience()">
+                                <i class="bi bi-play-circle me-2"></i>Evaluar Experiencia
+                            </button>
+                            <div id="spinner-eval-experience"></div>
+                        </div>
+                    </form>
+                {% else %}
+                    <div class="alert alert-warning mb-0">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        No se han extraido requisitos de experiencia.
+                        <a href="{% url 'analysis:step1' pk=session.pk %}">Regrese al Paso 1</a>
+                        y ejecute la extraccion de experiencia.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Form B: Indicadores -->
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header card-header-tendermod d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-bar-chart-line me-2"></i>Form B — Indicadores Financieros</h5>
+                {% if not session.indicators_requirements_json %}
+                    <span class="badge bg-warning text-dark">
+                        <i class="bi bi-exclamation-triangle me-1"></i>Sin datos — regrese al Paso 1
+                    </span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                {% if session.indicators_requirements_json %}
+                    <p class="text-muted small mb-3">
+                        Revise los indicadores financieros extraidos del pliego.
+                        Puede editar el valor requerido si el LLM lo interpreto incorrectamente.
+                    </p>
+
+                    <div id="indicators-table-container">
+                        <table class="table table-sm table-bordered align-middle mb-0" id="indicators-table">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:50%">Indicador</th>
+                                    <th style="width:50%">Valor / Condicion requerida</th>
+                                </tr>
+                            </thead>
+                            <tbody id="indicators-tbody">
+                                {% for ind in indicators_list %}
+                                <tr>
+                                    <td>
+                                        <input type="hidden" class="ind-name" value="{{ ind.indicador }}">
+                                        {{ ind.indicador }}
+                                    </td>
+                                    <td>
+                                        <input type="text" class="form-control form-control-sm ind-valor"
+                                               value="{{ ind.valor }}">
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="2" class="text-muted text-center">Sin indicadores extraidos.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="mt-4 d-flex align-items-center gap-3">
+                        <button type="button" class="btn btn-success btn-lg"
+                                onclick="evaluateIndicators()">
+                            <i class="bi bi-play-circle me-2"></i>Evaluar Indicadores
+                        </button>
+                        <div id="spinner-eval-indicators"></div>
+                    </div>
+                {% else %}
+                    <div class="alert alert-warning mb-0">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        No se han extraido indicadores financieros.
+                        <a href="{% url 'analysis:step1' pk=session.pk %}">Regrese al Paso 1</a>
+                        y ejecute la extraccion de indicadores.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Navigation -->
+<div class="d-flex justify-content-between align-items-center mt-4">
+    <a href="{% url 'analysis:step1' pk=session.pk %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Paso 1
+    </a>
+    <a href="{% url 'analysis:results' pk=session.pk %}"
+       class="btn btn-primary btn-lg"
+       id="btn-results">
+        <i class="bi bi-bar-chart-steps me-1"></i>Ver Resultados
+    </a>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var SESSION_ID = {{ session.pk }};
+
+function buildExperienceData() {
+    var form = document.getElementById('form-experience');
+    return {
+        listado_codigos: form.querySelector('[name=listado_codigos]').value,
+        cantidad_codigos: form.querySelector('[name=cantidad_codigos]').value,
+        objeto: form.querySelector('[name=objeto]').value,
+        cantidad_contratos: form.querySelector('[name=cantidad_contratos]').value,
+        valor: form.querySelector('[name=valor]').value,
+        pagina: form.querySelector('[name=pagina]').value,
+        seccion: form.querySelector('[name=seccion]').value,
+        regla_codigos: form.querySelector('[name=regla_codigos]').value,
+        objeto_exige_relevancia: form.querySelector('[name=objeto_exige_relevancia]').value,
+        umbral: (function() {
+            var el = document.getElementById('umbral-experiencia');
+            var v = parseFloat(el.value);
+            return isNaN(v) ? (parseFloat(el.defaultValue) || 0.75) : v;
+        })(),
+    };
+}
+
+function buildIndicatorsList() {
+    var rows = document.querySelectorAll('#indicators-tbody tr');
+    var list = [];
+    rows.forEach(function(row) {
+        var nameEl = row.querySelector('.ind-name');
+        var valEl = row.querySelector('.ind-valor');
+        if (nameEl && valEl) {
+            list.push({
+                indicador: nameEl.value,
+                valor: valEl.value,
+            });
+        }
+    });
+    return list;
+}
+
+function evaluateExperience() {
+    var expData = buildExperienceData();
+    launchEvaluation(
+        SESSION_ID,
+        'experience',
+        { experience_data: expData },
+        'spinner-eval-experience',
+        function(result) {
+            var cumple = result && result.cumple;
+            var msg = cumple ? 'CUMPLE — Evaluacion de experiencia completada.' : 'NO CUMPLE — Evaluacion completada.';
+            showSuccess('spinner-eval-experience', msg);
+        }
+    );
+}
+
+function evaluateIndicators() {
+    var indList = buildIndicatorsList();
+    if (indList.length === 0) {
+        showError('spinner-eval-indicators', 'No hay indicadores para evaluar.');
+        return;
+    }
+    launchEvaluation(
+        SESSION_ID,
+        'indicators',
+        { indicators_list: indList },
+        'spinner-eval-indicators',
+        function(result) {
+            var cumple = result && result.cumple;
+            var msg = cumple ? 'CUMPLE — Evaluacion de indicadores completada.' : 'NO CUMPLE — Evaluacion completada.';
+            showSuccess('spinner-eval-indicators', msg);
+        }
+    );
+}
+</script>
+{% endblock %}

@@ -1,7 +1,10 @@
 from openai import OpenAI
 from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage
 
 from tendermod.evaluation.prompts import basic_comparation_system_prompt, basic_comparation_user_prompt
+from tendermod.evaluation.schemas import ExperienceResponse, MultipleIndicatorResponse
 
 load_dotenv()
 def run_llm_indices(system_message, user_message, max_tokens=1000, temperature=0.3, top_p=0.95):
@@ -46,6 +49,28 @@ def run_llm_indicators_comparation(indicadores_emparejados: str, general_info: s
         top_p=top_p
     )
     return response.choices[0].message.content
+
+
+def run_llm_quick_experience(text: str) -> ExperienceResponse:
+    from tendermod.evaluation.prompts import QUICK_EXPERIENCE_SYSTEM_PROMPT, QUICK_EXPERIENCE_USER_PROMPT
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    structured_llm = llm.with_structured_output(ExperienceResponse)
+    messages = [
+        SystemMessage(content=QUICK_EXPERIENCE_SYSTEM_PROMPT),
+        HumanMessage(content=QUICK_EXPERIENCE_USER_PROMPT(text))
+    ]
+    return structured_llm.invoke(messages)
+
+
+def run_llm_quick_indicators(text: str) -> MultipleIndicatorResponse:
+    from tendermod.evaluation.prompts import QUICK_INDICATORS_SYSTEM_PROMPT, QUICK_INDICATORS_USER_PROMPT
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    structured_llm = llm.with_structured_output(MultipleIndicatorResponse)
+    messages = [
+        SystemMessage(content=QUICK_INDICATORS_SYSTEM_PROMPT),
+        HumanMessage(content=QUICK_INDICATORS_USER_PROMPT(text))
+    ]
+    return structured_llm.invoke(messages)
 
 
 

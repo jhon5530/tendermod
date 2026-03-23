@@ -1,0 +1,277 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Paso 1 — Extraccion de Requisitos{% endblock %}
+
+{% block content %}
+
+<!-- Stepper -->
+<div class="d-flex align-items-center gap-2 mb-4">
+    <span class="step-badge bg-success text-white"><i class="bi bi-check"></i></span>
+    <span class="text-muted">Subir PDF</span>
+    <div class="flex-grow-1 border-top mx-2"></div>
+    <span class="step-badge bg-primary text-white">2</span>
+    <span class="fw-semibold text-primary">Extraer requisitos</span>
+    <div class="flex-grow-1 border-top mx-2"></div>
+    <span class="step-badge bg-light text-muted border">3</span>
+    <span class="text-muted">Validar y evaluar</span>
+    <div class="flex-grow-1 border-top mx-2"></div>
+    <span class="step-badge bg-light text-muted border">4</span>
+    <span class="text-muted">Resultados</span>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+
+        <!-- Session info -->
+        <div class="d-flex align-items-center gap-3 mb-4">
+            <div>
+                <h4 class="mb-1">Paso 1 — Extraccion de Requisitos</h4>
+                <p class="text-muted mb-0">
+                    <i class="bi bi-file-earmark-pdf me-1 text-danger"></i>
+                    <strong>{{ session.pdf_filename }}</strong>
+                    &nbsp;&bull;&nbsp;
+                    <span class="badge bg-{{ session.status_display_class }}">
+                        {{ session.get_status_display }}
+                    </span>
+                </p>
+            </div>
+        </div>
+
+        <!-- PDF Ingestion status -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body">
+                <h6 class="card-title"><i class="bi bi-arrow-repeat me-2 text-warning"></i>Ingesta de PDF</h6>
+                <div id="spinner-ingest">
+                    {% if session.status == 'pdf_ready' or session.status == 'extracted' or session.status == 'completed' %}
+                        <div class="alert alert-success mb-0 py-2">
+                            <i class="bi bi-check-circle me-1"></i>PDF ingerido correctamente en ChromaDB.
+                        </div>
+                    {% elif session.status == 'error' %}
+                        <div class="alert alert-danger mb-0 py-2">
+                            <i class="bi bi-x-circle me-1"></i>Error durante la ingesta. Vuelva a subir el PDF.
+                        </div>
+                    {% else %}
+                        <div class="d-flex align-items-center gap-2 text-secondary">
+                            <div class="spinner-border spinner-border-sm" role="status"></div>
+                            <span>Ingiriendo PDF en ChromaDB...</span>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Extraction buttons -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header card-header-tendermod">
+                <h5 class="mb-0"><i class="bi bi-search me-2"></i>Extraccion de Requisitos del Pliego</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    Una vez ingerido el PDF, use los botones a continuacion para extraer los requisitos.
+                    Puede lanzarlos en cualquier orden — cada uno opera de forma independiente.
+                </p>
+
+                <!-- Experience extraction -->
+                <div class="d-flex align-items-start gap-3 mb-3 p-3 bg-light rounded">
+                    <div class="flex-grow-1">
+                        <strong>Requisitos de Experiencia</strong>
+                        <p class="text-muted small mb-0">
+                            Codigos UNSPSC, valor a acreditar, objeto y cantidad de contratos.
+                        </p>
+                    </div>
+                    <div>
+                        {% if has_experience %}
+                            <span class="badge bg-success me-2">
+                                <i class="bi bi-check me-1"></i>Extraido
+                            </span>
+                        {% endif %}
+                        <button class="btn btn-outline-primary btn-sm"
+                                id="btn-extract-experience"
+                                onclick="doExtractExperience()"
+                                {% if session.status == 'ingesting_pdf' or session.status == 'created' %}disabled{% endif %}>
+                            <i class="bi bi-briefcase me-1"></i>
+                            {% if has_experience %}Re-extraer{% else %}Buscar requisitos{% endif %}
+                        </button>
+                    </div>
+                </div>
+                <div id="spinner-experience" class="ms-3 mb-3"></div>
+
+                <!-- Indicators extraction -->
+                <div class="d-flex align-items-start gap-3 mb-3 p-3 bg-light rounded">
+                    <div class="flex-grow-1">
+                        <strong>Indicadores Financieros</strong>
+                        <p class="text-muted small mb-0">
+                            Indices de liquidez, endeudamiento, rentabilidad y capacidad financiera.
+                        </p>
+                    </div>
+                    <div>
+                        {% if has_indicators %}
+                            <span class="badge bg-success me-2">
+                                <i class="bi bi-check me-1"></i>Extraido
+                            </span>
+                        {% endif %}
+                        <button class="btn btn-outline-primary btn-sm"
+                                id="btn-extract-indicators"
+                                onclick="doExtractIndicators()"
+                                {% if session.status == 'ingesting_pdf' or session.status == 'created' %}disabled{% endif %}>
+                            <i class="bi bi-bar-chart-line me-1"></i>
+                            {% if has_indicators %}Re-extraer{% else %}Buscar indicadores{% endif %}
+                        </button>
+                    </div>
+                </div>
+                <div id="spinner-indicators" class="ms-3 mb-3"></div>
+
+                <!-- General info extraction -->
+                <div class="d-flex align-items-start gap-3 mb-3 p-3 bg-light rounded">
+                    <div class="flex-grow-1">
+                        <strong>Informacion General del Proceso</strong>
+                        <p class="text-muted small mb-0">
+                            Presupuesto oficial, objeto del contrato, numero del proceso.
+                        </p>
+                    </div>
+                    <div>
+                        {% if has_general_info %}
+                            <span class="badge bg-success me-2">
+                                <i class="bi bi-check me-1"></i>Extraido
+                            </span>
+                        {% endif %}
+                        <button class="btn btn-outline-secondary btn-sm"
+                                id="btn-extract-info"
+                                onclick="doExtractGeneralInfo()"
+                                {% if session.status == 'ingesting_pdf' or session.status == 'created' %}disabled{% endif %}>
+                            <i class="bi bi-info-circle me-1"></i>
+                            {% if has_general_info %}Re-extraer{% else %}Extraer info general{% endif %}
+                        </button>
+                    </div>
+                </div>
+                <div id="spinner-general-info" class="ms-3 mb-3"></div>
+
+            </div>
+        </div>
+
+        <!-- Continue button -->
+        <div class="d-flex justify-content-between align-items-center">
+            <a href="{% url 'analysis:new' %}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left me-1"></i>Nuevo PDF
+            </a>
+            <a href="{% url 'analysis:step2' pk=session.pk %}"
+               class="btn btn-primary btn-lg {% if not has_experience and not has_indicators %}disabled{% endif %}"
+               id="btn-continue">
+                <i class="bi bi-arrow-right me-1"></i>Continuar al Paso 2
+            </a>
+        </div>
+
+    </div>
+
+    <!-- Right column: info panel -->
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h6 class="card-title text-muted">
+                    <i class="bi bi-lightbulb me-1"></i>Que hace cada extraccion
+                </h6>
+                <ul class="small text-muted mb-0">
+                    <li class="mb-2">
+                        <strong>Experiencia:</strong> El LLM lee el pliego via RAG y extrae
+                        los codigos UNSPSC, valor minimo, objeto requerido y regla de validacion.
+                    </li>
+                    <li class="mb-2">
+                        <strong>Indicadores:</strong> Extrae los indicadores financieros habilitantes
+                        (liquidez, endeudamiento, rentabilidad) con sus umbrales.
+                    </li>
+                    <li>
+                        <strong>Info general:</strong> Recupera el presupuesto oficial y datos
+                        contextuales del proceso. Opcional pero recomendado.
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Hidden CSRF for AJAX -->
+{% csrf_token %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var SESSION_ID = {{ session.pk }};
+var pdfReady = '{{ session.status }}' !== 'created' && '{{ session.status }}' !== 'ingesting_pdf';
+
+// If PDF is still being ingested, poll until ready
+{% if session.status == 'ingesting_pdf' or session.status == 'created' %}
+if ('{{ session.celery_task_id }}') {
+    pollTask(
+        '{{ session.celery_task_id }}',
+        function(result) {
+            showSuccess('spinner-ingest', 'PDF ingerido correctamente en ChromaDB.');
+            // Enable extraction buttons
+            document.getElementById('btn-extract-experience').disabled = false;
+            document.getElementById('btn-extract-indicators').disabled = false;
+            document.getElementById('btn-extract-info').disabled = false;
+            pdfReady = true;
+        },
+        function(err) {
+            showError('spinner-ingest', 'Error en ingesta: ' + err + '. Vuelva a subir el PDF.');
+        }
+    );
+}
+{% endif %}
+
+function doExtractExperience() {
+    launchExtraction(
+        SESSION_ID,
+        'experience',
+        'spinner-experience',
+        'Requisitos de experiencia extraidos correctamente.',
+        function(result) {
+            document.getElementById('btn-extract-experience').innerHTML =
+                '<i class="bi bi-briefcase me-1"></i>Re-extraer';
+            enableContinueIfReady();
+        }
+    );
+}
+
+function doExtractIndicators() {
+    launchExtraction(
+        SESSION_ID,
+        'indicators',
+        'spinner-indicators',
+        'Indicadores financieros extraidos correctamente.',
+        function(result) {
+            document.getElementById('btn-extract-indicators').innerHTML =
+                '<i class="bi bi-bar-chart-line me-1"></i>Re-extraer';
+            enableContinueIfReady();
+        }
+    );
+}
+
+function doExtractGeneralInfo() {
+    launchExtraction(
+        SESSION_ID,
+        'general_info',
+        'spinner-general-info',
+        'Informacion general extraida correctamente.',
+        function(result) {
+            document.getElementById('btn-extract-info').innerHTML =
+                '<i class="bi bi-info-circle me-1"></i>Re-extraer';
+        }
+    );
+}
+
+var experienceExtracted = {{ has_experience|yesno:'true,false' }};
+var indicatorsExtracted = {{ has_indicators|yesno:'true,false' }};
+
+function enableContinueIfReady() {
+    // Enable continue button once at least one extraction is done
+    if (experienceExtracted || indicatorsExtracted) {
+        var btn = document.getElementById('btn-continue');
+        if (btn) btn.classList.remove('disabled');
+    }
+}
+
+// Override launchExtraction success tracking
+var _origLaunchExtraction = launchExtraction;
+</script>
+{% endblock %}
