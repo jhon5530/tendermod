@@ -27,12 +27,14 @@ Actividades ejecutadas
 
 Proximos pasos
 - Corregir errores como:
- - No funciona la funcion de evaluar objeto.
- - Mas detalle en la  impresion del resultado.
+ - No funciona la funcion de evaluar objeto (Pareciera que no busca los resultados mas cercanos al objeto sino que parte por los de mayor valor y cumplimiento de codigos).
  - Adicion de umbral:
-   - Colocar en la interzar el umbral como un parametro editable en una URL nueva llamada "Configuraciones" en el menu izquierodo dentro de EMPRESA. Este es configuracion de sistema por lo que es el valor por defecto de umbral solo modificable desde aqui.
+   - Colocar en la interfaz el umbral como un parametro editable en una URL nueva llamada "Configuraciones" en el menu izquierodo dentro de EMPRESA. Este es configuracion de sistema por lo que es el valor por defecto de umbral solo modificable desde aqui.
    - En la interfaz en la URL http://localhost:8000/analysis/quick/ adicionar tambien un campo para colocar umbral y tenerlo e cuenta unicamente en esta busqueda.
    - En la interfaz en la URL http://localhost:8000/analysis/1/step2/ adicionar tambien un campo para colocar umbral y tenerlo e cuenta unicamente en esta busqueda.
+
+- Formato de valores en la interfaz grafica
+
 
  - No esta almacenando la informacion cuando edito sobre el paso 2, eso quiere decir que cuando me devuelvo sigue con la info original.
 
