@@ -1,6 +1,39 @@
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Union, Optional, Literal
 
+class ExperienceSubRequirement(BaseModel):
+    """Un sub-requisito de experiencia especifica del pliego."""
+    descripcion: str = Field(
+        description="Descripcion exacta del sub-requisito tal como aparece en el pliego"
+    )
+    codigos_unspsc: List[str] = Field(
+        default=[],
+        description="Codigos UNSPSC especificos de este sub-req (hereda globales si vacio)"
+    )
+    cantidad_minima_contratos: int = Field(
+        default=1,
+        description="Minimo de contratos distintos que deben cubrir este sub-requisito"
+    )
+    valor_minimo: str = Field(
+        default="None",
+        description="Valor minimo para este sub-req especifico. 'None' si no aplica."
+    )
+    objeto_exige_relevancia: Literal["SI", "NO", "NO_ESPECIFICADO"] = Field(
+        default="NO_ESPECIFICADO"
+    )
+
+
+class SubRequirementComplianceResult(BaseModel):
+    """Resultado de evaluacion para un sub-requisito individual."""
+    indice: int
+    descripcion: str
+    rups_candidatos: List[Union[int, str]] = Field(default=[])
+    rup_elegido: Optional[Union[int, str]] = Field(default=None)
+    score_objeto: Optional[float] = Field(default=None)
+    objeto_contrato: Optional[str] = Field(default=None)
+    cumple: bool = Field(default=False)
+
+
 class Indicator(BaseModel):
     indicador: str = Field(description="El nombre del indicador")
     valor: Union[str, float] = Field(description="El valor del indicador")
@@ -62,6 +95,16 @@ class ExperienceResponse(BaseModel):
         ),
         alias="Objeto exige relevancia"
     )
+    modo_evaluacion: Literal["GLOBAL", "MULTI_CONDICION"] = Field(
+        default="GLOBAL",
+        alias="Modo evaluacion",
+        description="MULTI_CONDICION cuando el pliego exige contratos distintos por actividad"
+    )
+    sub_requisitos: List[ExperienceSubRequirement] = Field(
+        default=[],
+        alias="Sub requisitos",
+        description="Lista de sub-requisitos. Vacia en modo GLOBAL."
+    )
 
 
 class IndicatorComplianceResult(BaseModel):
@@ -117,3 +160,10 @@ class ExperienceComplianceResult(BaseModel):
         description="Umbral de similitud semántica utilizado en la evaluación de objeto"
     )
     cumple: bool = Field(default=False, description="True si al menos 1 RUP cumple todos los criterios")
+    modo_evaluacion: str = Field(default="GLOBAL", description="Modo de evaluacion usado: GLOBAL o MULTI_CONDICION")
+    sub_requisitos_resultado: List[SubRequirementComplianceResult] = Field(
+        default=[],
+        description="Resultados por sub-requisito en modo MULTI_CONDICION"
+    )
+    sub_requisitos_cumplidos: int = Field(default=0, description="Cantidad de sub-requisitos que cumplen")
+    sub_requisitos_totales: int = Field(default=0, description="Cantidad total de sub-requisitos evaluados")

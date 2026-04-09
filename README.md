@@ -20,12 +20,14 @@ Actividades ejecutadas
 - (22-03-26) 
  - Correccion de errores en interpretacion de presupuesto.
  - Creacion de interfaz grafica
+- (08-04-26)  Se realizo ajuste de subrequisitos para evaluar experiencias especificas puntuales
 
 
 
 
 
 Proximos pasos
+- Adicionar fragmentos de texto de experiencia que se tuvo en cuenta para la evaluacion, junto con sus paginas. Esto para que el humano que revise la experiencia tenga rapidamente un punto de comparacion del requerimiento textual del pliego vs el resultado de la evaluacion, esto tambien adicionarlo al .txt descargable.
 - Corregir errores como:
  - No funciona la funcion de evaluar objeto (Pareciera que no busca los resultados mas cercanos al objeto sino que parte por los de mayor valor y cumplimiento de codigos).
  - Adicion de umbral:

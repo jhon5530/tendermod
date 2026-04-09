@@ -3,9 +3,14 @@
 
 import re
 import sqlite3
-from typing import Optional, Dict, Union
+from typing import Optional, Dict, Union, List
 from tendermod.evaluation.experience_inference import get_experience
-from tendermod.evaluation.schemas import ExperienceResponse, ExperienceComplianceResult, RupExperienceResult
+from tendermod.evaluation.schemas import (
+    ExperienceResponse,
+    ExperienceComplianceResult,
+    RupExperienceResult,
+    SubRequirementComplianceResult,
+)
 from tendermod.ingestion.experience_db_loader import DB_PATH
 from tendermod.config.settings import CHROMA_EXPERIENCE_PERSIST_DIR
 from tendermod.retrieval.embeddings import embed_docs
@@ -398,10 +403,11 @@ def filter_rups_by_object(
     return rups_aprobados, scores_por_rup, objetos_por_rup
 
 
-def check_compliance_experience(
+def _check_global_experience(
     tender_experience: ExperienceResponse,
     similarity_threshold: float = 0.75,
 ) -> ExperienceComplianceResult:
+    """Lógica de evaluación GLOBAL (flujo original, sin cambios)."""
     raw_codes = tender_experience.listado_codigos
 
     if not raw_codes:
@@ -613,8 +619,199 @@ def check_compliance_experience(
         rups_excluidos_por_objeto=rups_excluidos,
         objeto_exige_relevancia=objeto_exige_relevancia,
         similarity_threshold_usado=similarity_threshold,
-        cumple=len(rups_cumplen) > 0
+        cumple=len(rups_cumplen) > 0,
+        modo_evaluacion="GLOBAL",
     )
+
+
+def check_multi_condition_experience(
+    tender_experience: ExperienceResponse,
+    rups_candidatos_codigos: list,
+    similarity_threshold: float = 0.75,
+) -> ExperienceComplianceResult:
+    """
+    Evaluacion MULTI_CONDICION: cada sub-requisito debe ser cubierto por un
+    contrato RUP distinto.
+
+    Algoritmo greedy:
+    1. Para cada sub-requisito hace similarity_search en ChromaDB experiencia.
+    2. Calcula el score maximo por RUP dentro del pool candidato (por codigos).
+    3. Ordena sub-requisitos de menor a mayor numero de candidatos (mas restrictivos primero).
+    4. Asigna el RUP disponible con mayor score a cada sub-req; lo retira del pool.
+
+    El campo `cumple` global es True solo si TODOS los sub-requisitos cumplen.
+    """
+    sub_requisitos = tender_experience.sub_requisitos
+    print(f"[MULTI_CONDICION] {len(sub_requisitos)} sub-requisitos | pool codigos: {len(rups_candidatos_codigos)} RUPs")
+
+    # Abrir vectorstore una sola vez
+    vectorstore = None
+    try:
+        vectorstore = read_vectorstore(
+            embed_docs(),
+            path=CHROMA_EXPERIENCE_PERSIST_DIR,
+            collection_name="rup",
+        )
+        try:
+            total_docs = vectorstore._collection.count()
+            k_dinamico = total_docs if total_docs > 0 else max(20, len(rups_candidatos_codigos) * 4)
+        except Exception:
+            k_dinamico = max(200, len(rups_candidatos_codigos) * 10)
+        print(f"[MULTI_CONDICION] ChromaDB abierto. k_dinamico={k_dinamico}")
+    except Exception as e:
+        print(f"[MULTI_CONDICION] ERROR al abrir ChromaDB: {e}")
+
+    # Paso 1: calcular candidatos por sub-requisito (scores maximos por RUP)
+    candidatos_por_subreq: List[List[tuple]] = []  # [(rup, score, objeto_contrato), ...]
+
+    for i, sub in enumerate(sub_requisitos):
+        scores_por_rup: dict = {}
+        objetos_por_rup: dict = {}
+
+        if vectorstore is not None:
+            try:
+                results = vectorstore.similarity_search_with_relevance_scores(
+                    sub.descripcion, k=k_dinamico
+                )
+                for doc, score in results:
+                    raw_key = doc.metadata.get("numero_rup")
+                    if raw_key is None:
+                        continue
+                    try:
+                        rup_key = int(raw_key)
+                    except (TypeError, ValueError):
+                        rup_key = raw_key
+                    clamped = max(0.0, min(1.0, score))
+                    if clamped > scores_por_rup.get(rup_key, -1.0):
+                        scores_por_rup[rup_key] = clamped
+                        objetos_por_rup[rup_key] = doc.page_content
+            except Exception as e:
+                print(f"[MULTI_CONDICION] ERROR similarity_search sub-req {i}: {e}")
+
+        # Filtrar por pool de codigos y umbral
+        candidatos = [
+            (rup, scores_por_rup.get(rup, None), objetos_por_rup.get(rup))
+            for rup in rups_candidatos_codigos
+            if scores_por_rup.get(rup, 0.0) >= similarity_threshold
+        ]
+        print(f"[MULTI_CONDICION] Sub-req {i} '{sub.descripcion[:60]}': {len(candidatos)} candidatos")
+        candidatos_por_subreq.append(candidatos)
+
+    # Paso 2: greedy — ordenar por numero de candidatos ASC (mas restrictivos primero)
+    indices_ordenados = sorted(range(len(sub_requisitos)), key=lambda i: len(candidatos_por_subreq[i]))
+
+    resultados: List[SubRequirementComplianceResult] = [None] * len(sub_requisitos)  # type: ignore
+    pool_disponible = set(rups_candidatos_codigos)
+
+    for idx in indices_ordenados:
+        sub = sub_requisitos[idx]
+        candidatos = candidatos_por_subreq[idx]
+        todos_candidatos_rup = [rup for rup, _, _ in candidatos]
+
+        # Filtrar candidatos disponibles (no asignados aun)
+        disponibles = [(rup, sc, obj) for rup, sc, obj in candidatos if rup in pool_disponible]
+        disponibles.sort(key=lambda x: x[1] if x[1] is not None else -1.0, reverse=True)
+
+        if disponibles:
+            rup_elegido, score_elegido, objeto_elegido = disponibles[0]
+            pool_disponible.discard(rup_elegido)
+            cumple_sub = True
+            print(f"[MULTI_CONDICION] Sub-req {idx}: RUP {rup_elegido} asignado (score={score_elegido:.3f})")
+        else:
+            rup_elegido, score_elegido, objeto_elegido = None, None, None
+            cumple_sub = False
+            print(f"[MULTI_CONDICION] Sub-req {idx}: sin candidatos disponibles -> NO CUMPLE")
+
+        resultados[idx] = SubRequirementComplianceResult(
+            indice=idx,
+            descripcion=sub.descripcion,
+            rups_candidatos=todos_candidatos_rup,
+            rup_elegido=rup_elegido,
+            score_objeto=score_elegido,
+            objeto_contrato=objeto_elegido,
+            cumple=cumple_sub,
+        )
+
+    sub_cumplidos = sum(1 for r in resultados if r.cumple)
+    cumple_global = all(r.cumple for r in resultados)
+
+    # Codigos requeridos globales (normalizados)
+    raw_codes = tender_experience.listado_codigos
+    codes = normalize_and_validate_codes(raw_codes) if raw_codes else raw_codes
+
+    return ExperienceComplianceResult(
+        codigos_requeridos=codes,
+        rups_candidatos_codigos=rups_candidatos_codigos,
+        cantidad_contratos_requerida=None,
+        valor_requerido_cop=None,
+        objeto_requerido=tender_experience.objeto if tender_experience.objeto not in ("None", "", None) else None,
+        rups_evaluados=[],
+        rups_cumplen=[r.rup_elegido for r in resultados if r.cumple and r.rup_elegido is not None],
+        total_valor_cop=None,
+        rups_excluidos_por_objeto=[],
+        objeto_exige_relevancia=tender_experience.objeto_exige_relevancia,
+        similarity_threshold_usado=similarity_threshold,
+        cumple=cumple_global,
+        modo_evaluacion="MULTI_CONDICION",
+        sub_requisitos_resultado=resultados,
+        sub_requisitos_cumplidos=sub_cumplidos,
+        sub_requisitos_totales=len(resultados),
+    )
+
+
+def check_compliance_experience(
+    tender_experience: ExperienceResponse,
+    similarity_threshold: float = 0.75,
+) -> ExperienceComplianceResult:
+    """
+    Punto de entrada publico para la evaluacion de experiencia.
+
+    Bifurca entre:
+    - GLOBAL: flujo original (check_global_experience).
+    - MULTI_CONDICION: nuevo flujo multi-sub-requisito (check_multi_condition_experience).
+    """
+    raw_codes = tender_experience.listado_codigos
+
+    if not raw_codes:
+        print("ADVERTENCIA: No se encontraron códigos UNSPSC en los requisitos del pliego")
+        return ExperienceComplianceResult(
+            codigos_requeridos=[],
+            cumple=False
+        )
+
+    codes = normalize_and_validate_codes(raw_codes)
+
+    if not codes:
+        print("ADVERTENCIA: Los códigos UNSPSC del pliego no pudieron normalizarse")
+        return ExperienceComplianceResult(
+            codigos_requeridos=raw_codes,
+            cumple=False
+        )
+
+    regla = getattr(tender_experience, 'regla_codigos', 'AT_LEAST_ONE')
+    min_codigos = len(codes) if regla == "ALL" else 1
+    print(f"Regla de validación de códigos: {regla} → min_codigos={min_codigos}")
+
+    rups_codigos = check_code_compliance(codes, min_codigos=min_codigos)
+    print(f"RUPs que cumplen códigos: {rups_codigos} ({len(rups_codigos)} total)")
+
+    if not rups_codigos:
+        return ExperienceComplianceResult(
+            codigos_requeridos=codes,
+            rups_candidatos_codigos=[],
+            cumple=False
+        )
+
+    # Bifurcacion segun modo de evaluacion
+    modo = getattr(tender_experience, 'modo_evaluacion', 'GLOBAL')
+    sub_requisitos = getattr(tender_experience, 'sub_requisitos', [])
+
+    if modo == "MULTI_CONDICION" and sub_requisitos:
+        print(f"[check_compliance_experience] Modo MULTI_CONDICION detectado con {len(sub_requisitos)} sub-requisitos")
+        return check_multi_condition_experience(tender_experience, rups_codigos, similarity_threshold)
+    else:
+        print(f"[check_compliance_experience] Modo GLOBAL")
+        return _check_global_experience(tender_experience, similarity_threshold)
 
 
 def check_code_compliance(

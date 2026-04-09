@@ -7,7 +7,7 @@ from tendermod.evaluation.prompts import basic_comparation_system_prompt, basic_
 from tendermod.evaluation.schemas import ExperienceResponse, MultipleIndicatorResponse
 
 load_dotenv()
-def run_llm_indices(system_message, user_message, max_tokens=1000, temperature=0.3, top_p=0.95):
+def run_llm_indices(system_message, user_message, max_tokens=2500, temperature=0.3, top_p=0.95):
     client = OpenAI()
 
     response = client.chat.completions.create(

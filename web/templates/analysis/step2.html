@@ -107,6 +107,43 @@
                                        class="form-control">
                                 <div class="form-text">Sobreescribe el umbral global por esta evaluacion (0.0 - 1.0). Configurar en <a href="{% url 'redneet:settings' %}">Configuraciones</a>.</div>
                             </div>
+
+                            {% if exp_data.modo_evaluacion == "MULTI_CONDICION" %}
+                            <div class="col-12 mt-3">
+                                <label class="form-label fw-semibold">
+                                    Sub-requisitos de Experiencia Especifica
+                                    <span class="badge bg-info text-dark ms-1">Multi-condicion</span>
+                                </label>
+                                <div id="sub-requisitos-container">
+                                    {% for sub in exp_data.sub_requisitos %}
+                                    <div class="card border mb-2 sub-req-card" data-index="{{ forloop.counter0 }}">
+                                        <div class="card-body py-2">
+                                            <div class="row g-2 align-items-center">
+                                                <div class="col-1 text-center fw-bold text-muted">{{ forloop.counter }}</div>
+                                                <div class="col-7">
+                                                    <input type="text" class="form-control form-control-sm sub-req-desc"
+                                                           value="{{ sub.descripcion }}">
+                                                </div>
+                                                <div class="col-2">
+                                                    <input type="text" class="form-control form-control-sm sub-req-codigos"
+                                                           value="{{ sub.codigos_unspsc|join:', ' }}"
+                                                           placeholder="Codigos UNSPSC">
+                                                </div>
+                                                <div class="col-2">
+                                                    <input type="number" class="form-control form-control-sm sub-req-cantidad"
+                                                           value="{{ sub.cantidad_minima_contratos }}" min="1">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                <div class="form-text">
+                                    Cada sub-requisito debe ser cubierto por un contrato RUP distinto.
+                                </div>
+                            </div>
+                            {% endif %}
+
                         </div>
                         <div class="mt-4 d-flex align-items-center gap-3">
                             <button type="button" class="btn btn-success btn-lg"
@@ -216,7 +253,30 @@ var SESSION_ID = {{ session.pk }};
 
 function buildExperienceData() {
     var form = document.getElementById('form-experience');
-    return {
+
+    // Recolectar sub-requisitos si existen cards editables
+    var subReqCards = document.querySelectorAll('.sub-req-card');
+    var subRequisitos = [];
+    subReqCards.forEach(function(card) {
+        var desc = card.querySelector('.sub-req-desc');
+        var codigos = card.querySelector('.sub-req-codigos');
+        var cantidad = card.querySelector('.sub-req-cantidad');
+        if (desc) {
+            var codigosArr = [];
+            if (codigos && codigos.value.trim()) {
+                codigosArr = codigos.value.split(',').map(function(c) { return c.trim(); }).filter(Boolean);
+            }
+            subRequisitos.push({
+                descripcion: desc.value,
+                codigos_unspsc: codigosArr,
+                cantidad_minima_contratos: cantidad ? (parseInt(cantidad.value) || 1) : 1,
+                valor_minimo: 'None',
+                objeto_exige_relevancia: 'NO_ESPECIFICADO',
+            });
+        }
+    });
+
+    var data = {
         listado_codigos: form.querySelector('[name=listado_codigos]').value,
         cantidad_codigos: form.querySelector('[name=cantidad_codigos]').value,
         objeto: form.querySelector('[name=objeto]').value,
@@ -232,6 +292,14 @@ function buildExperienceData() {
             return isNaN(v) ? (parseFloat(el.defaultValue) || 0.75) : v;
         })(),
     };
+
+    // Agregar campos MULTI_CONDICION solo si hay sub-requisitos
+    if (subRequisitos.length > 0) {
+        data['Modo evaluacion'] = 'MULTI_CONDICION';
+        data['Sub requisitos'] = subRequisitos;
+    }
+
+    return data;
 }
 
 function buildIndicatorsList() {

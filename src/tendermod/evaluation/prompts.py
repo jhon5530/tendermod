@@ -157,6 +157,22 @@ The agent must answer the following questions based on the contextual informatio
    Answer "NO" if the pliego explicitly states that experience is not restricted by the object or purpose.
    Answer "NO_ESPECIFICADO" in all other cases (object is mentioned but not linked to experience requirements, or no information available).
 
+8- Does the tender list MULTIPLE INDEPENDENT experience sub-requirements, where each must be
+   satisfied by at least ONE SEPARATE contract? Look for patterns like:
+   - "Al menos un (1) contrato con [X]" followed by "Al menos un (1) contrato con [Y]"
+   - A numbered list where each item describes a different type of work/supply
+   Answer "MULTI_CONDICION" if such a pattern exists. Answer "GLOBAL" in all other cases.
+
+9- If you answered "MULTI_CONDICION" in question 8, extract each sub-requirement as a
+   separate entry in "Sub requisitos". For each sub-requirement provide:
+   - descripcion: the exact description from the pliego
+   - codigos_unspsc: UNSPSC codes specific to this sub-req (inherit global list if not specified individually)
+   - cantidad_minima_contratos: minimum number of contracts required (default 1)
+   - valor_minimo: minimum value if specified per sub-req, otherwise "None"
+   - objeto_exige_relevancia: "SI" if linked to the object of this process, "NO_ESPECIFICADO" otherwise
+   If you answered "GLOBAL", return an empty list [].
+   NEVER put the general object description as a sub-requisito.
+
 It is acceptable not to have an answer to any of these questions and simply respond "I cannot find information on this," but never fabricate information. Only provide the answer. not the question.
 
 Return only the result as JSON in the following format:
@@ -171,7 +187,23 @@ Return only the result as JSON in the following format:
      "Pagina": "Toma la pagina de los metadatos",
      "Seccion": "toma la seccion del contexto",
      "Regla codigos": "AT_LEAST_ONE",
-     "Objeto exige relevancia": "NO_ESPECIFICADO"
+     "Objeto exige relevancia": "NO_ESPECIFICADO",
+     "Modo evaluacion": "GLOBAL",
+     "Sub requisitos": []
+}
+
+Example with sub-requirements (MULTI_CONDICION):
+{
+     "Modo evaluacion": "MULTI_CONDICION",
+     "Sub requisitos": [
+         {
+             "descripcion": "Al menos 1 contrato con suministro e instalacion de UPSs en Datacenters",
+             "codigos_unspsc": ["432217"],
+             "cantidad_minima_contratos": 1,
+             "valor_minimo": "None",
+             "objeto_exige_relevancia": "SI"
+         }
+     ]
 }
 
 
@@ -212,7 +244,11 @@ Identifica:
 - Valor mínimo requerido (en pesos colombianos o SMMLV)
 - Objeto del contrato
 - Cantidad mínima de contratos requeridos
-- Página y sección si se mencionan (si no, usa "N/A")"""
+- Página y sección si se mencionan (si no, usa "N/A")
+- Si el texto describe múltiples sub-requisitos independientes donde cada uno debe ser cubierto por
+  un contrato DISTINTO (patrón "Al menos 1 contrato para [X]", "Al menos 1 contrato para [Y]",
+  lista numerada con distintos tipos de trabajo/suministro), indica "Modo evaluacion": "MULTI_CONDICION"
+  y extrae cada sub-requisito en la lista "Sub requisitos". En caso contrario, usa "GLOBAL" y lista vacía."""
 
 
 QUICK_INDICATORS_SYSTEM_PROMPT = """Eres un asistente especializado en análisis financiero para contratación pública colombiana.

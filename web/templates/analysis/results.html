@@ -161,6 +161,61 @@
         </div>
         {% endif %}
 
+        <!-- Tabla de sub-requisitos MULTI_CONDICION -->
+        {% if exp_result.modo_evaluacion == "MULTI_CONDICION" %}
+        <div class="mb-4">
+            <h6 class="text-muted small text-uppercase mb-2">
+                Verificacion por Sub-requisito
+                ({{ exp_result.sub_requisitos_cumplidos }}/{{ exp_result.sub_requisitos_totales }} cumplidos)
+            </h6>
+            <table class="table table-bordered table-sm align-middle">
+                <thead class="table-dark">
+                    <tr>
+                        <th>#</th>
+                        <th>Sub-requisito</th>
+                        <th>RUP Asignado</th>
+                        <th class="text-center">Score</th>
+                        <th class="text-center">Resultado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sub in exp_result.sub_requisitos_resultado %}
+                    <tr {% if sub.cumple %}class="table-success"{% else %}class="table-danger"{% endif %}>
+                        <td>{{ sub.indice|add:1 }}</td>
+                        <td class="small">{{ sub.descripcion }}</td>
+                        <td>
+                            {% if sub.rup_elegido %}
+                                <strong>{{ sub.rup_elegido }}</strong>
+                                {% if sub.objeto_contrato %}
+                                <div class="text-muted" style="font-size:0.7rem">
+                                    {{ sub.objeto_contrato|truncatechars:80 }}
+                                </div>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">Ninguno disponible</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if sub.score_objeto is not None %}
+                                {{ sub.score_objeto|floatformat:3 }}
+                            {% else %}
+                                <span class="text-muted">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if sub.cumple %}
+                                <span class="badge bg-success">CUMPLE</span>
+                            {% else %}
+                                <span class="badge bg-danger">NO CUMPLE</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
         <!-- RUPs table -->
         {% if exp_result.rups_evaluados %}
         <div class="table-responsive">

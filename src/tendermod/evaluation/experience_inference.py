@@ -31,7 +31,19 @@ def get_experience(user_input: str, k):
     # Evaluation
     #before = vectorStore._collection.count()
     #print(f"Count before retriever is {before}")
-    context_for_query = build_context(retriever, chunks, user_input, k=k )
+    context_for_query = build_context(retriever, chunks, user_input, k=k)
+
+    # Segunda búsqueda dirigida para capturar sub-requisitos de experiencia específica
+    # (patrón "al menos un contrato con X" que puede estar en chunks distintos a la sección general)
+    specific_query = "experiencia específica al menos un contrato"
+    context_specific = build_context(retriever, chunks, specific_query, k=5)
+    if context_specific and context_specific.strip() not in context_for_query:
+        context_for_query = (
+            context_for_query
+            + "\n\n--- Sección de Experiencia Específica ---\n"
+            + context_specific
+        )
+
     #after = vectorStore._collection.count()
     #print(f"Context_for_query is: \n{context_for_query}")
     user_message = qna_user_message_experience

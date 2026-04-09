@@ -178,6 +178,15 @@ def analysis_step2(request, pk):
     exp_form = ExperienceEditForm(initial=exp_initial)
     ind_form = IndicatorsEditForm(initial=ind_initial)
 
+    # Parsear objeto completo ExperienceResponse para acceso en la plantilla
+    exp_data = None
+    if session.experience_requirements_json:
+        try:
+            from tendermod.evaluation.schemas import ExperienceResponse
+            exp_data = ExperienceResponse.model_validate_json(session.experience_requirements_json)
+        except Exception as exc:
+            logger.error('Error parseando ExperienceResponse para step2: %s', exc)
+
     context = {
         'session': session,
         'exp_form': exp_form,
@@ -185,6 +194,7 @@ def analysis_step2(request, pk):
         'indicators_list': indicators_list,
         'exp_initial_json': json.dumps(exp_initial),
         'system_threshold': SystemConfig.get_solo().threshold_objeto,
+        'exp_data': exp_data,
     }
     return render(request, 'analysis/step2.html', context)
 
@@ -374,6 +384,35 @@ def export_excel(request, pk):
         max_len = max((len(str(cell.value or '')) for cell in col), default=10)
         ws_exp.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
 
+    # ---- Hoja 3: Sub-Requisitos (solo si hay datos MULTI_CONDICION) ----
+    if result.experience_result_json:
+        try:
+            from tendermod.evaluation.schemas import ExperienceComplianceResult as ECR
+            exp_check = ECR.model_validate_json(result.experience_result_json)
+            if exp_check.sub_requisitos_resultado:
+                ws_sub = wb.create_sheet('Sub-Requisitos')
+                sub_headers = ['NUMERO RUP', 'Sub-Requisito', 'Cumple', 'Score', 'Contrato que Cumple']
+                for col_num, header in enumerate(sub_headers, 1):
+                    cell = ws_sub.cell(row=1, column=col_num, value=header)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = Alignment(horizontal='center')
+
+                for sr in exp_check.sub_requisitos_resultado:
+                    ws_sub.append([
+                        sr.rup_elegido if sr.rup_elegido is not None else '',
+                        sr.descripcion,
+                        'CUMPLE' if sr.cumple else 'NO CUMPLE',
+                        f'{sr.score_objeto:.3f}' if sr.score_objeto is not None else 'N/A',
+                        (sr.objeto_contrato or '')[:200],
+                    ])
+
+                for col in ws_sub.columns:
+                    max_len = max((len(str(cell.value or '')) for cell in col), default=10)
+                    ws_sub.column_dimensions[col[0].column_letter].width = min(max_len + 4, 60)
+        except Exception as exc:
+            logger.warning('No se pudo generar hoja Sub-Requisitos: %s', exc)
+
     # ---- Generar respuesta ----
     output = BytesIO()
     wb.save(output)
@@ -502,6 +541,16 @@ def export_text(request, pk):
                     lines.append(f'  │  Contrato elegido: {contrato_short}')
 
                 lines.append(f'  └─ Resultado      : {cumple_rup}')
+                lines.append('')
+
+            # Sub-requisitos MULTI_CONDICION (nivel global, no por RUP)
+            if exp.sub_requisitos_resultado:
+                lines.append('Sub-requisitos (MULTI_CONDICION):')
+                for sr in exp.sub_requisitos_resultado:
+                    estado = 'CUMPLE' if sr.cumple else 'NO CUMPLE'
+                    score_str = f'Score={sr.score_objeto:.3f}' if sr.score_objeto is not None else 'Score=N/A'
+                    rup_str = f'RUP={sr.rup_elegido}' if sr.rup_elegido is not None else 'RUP=Ninguno'
+                    lines.append(f'  [{estado}] {sr.descripcion} ({score_str}, {rup_str})')
                 lines.append('')
         except Exception as exc:
             lines.append(f'Error al parsear: {exc}')
