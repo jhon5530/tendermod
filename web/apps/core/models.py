@@ -57,6 +57,9 @@ class AnalysisResult(models.Model):
     cumple_experiencia = models.BooleanField(null=True)
     cumple_indicadores = models.BooleanField(null=True)
     cumple_final = models.BooleanField(null=True)
+    # Contexto RAG crudo del retriever usado en cada evaluacion
+    indicators_context_text = models.TextField(blank=True, default='')
+    experience_context_text = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

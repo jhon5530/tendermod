@@ -46,11 +46,11 @@ def experience_comparation() -> Optional[ExperienceResponse]:
         "códigos UNSPSC valor acreditar SMMLV COP cantidad contratos objeto"
     )
     k = 10
-    tender_experience = get_experience(user_input=query, k=k)
+    tender_experience, experience_context = get_experience(user_input=query, k=k)
     if tender_experience is None:
         print("ERROR: No se pudieron extraer requisitos de experiencia del PDF")
-        return None
-    return tender_experience
+        return None, ""
+    return tender_experience, experience_context
 
 
 
@@ -739,11 +739,18 @@ def check_multi_condition_experience(
     raw_codes = tender_experience.listado_codigos
     codes = normalize_and_validate_codes(raw_codes) if raw_codes else raw_codes
 
+    # Resolver valor requerido (igual que en _check_global_experience)
+    presupuesto_str = get_general_info("Cual es el presupuesto oficial del proceso?", k=2)
+    presupuesto_cop = _parse_presupuesto(presupuesto_str)
+    print(f"[MULTI_CONDICION] Presupuesto oficial recuperado: {presupuesto_cop}")
+    valor_cop = parse_valor(tender_experience.valor, presupuesto_cop=presupuesto_cop)
+    print(f"[MULTI_CONDICION] Valor mínimo requerido (COP): {valor_cop}")
+
     return ExperienceComplianceResult(
         codigos_requeridos=codes,
         rups_candidatos_codigos=rups_candidatos_codigos,
         cantidad_contratos_requerida=None,
-        valor_requerido_cop=None,
+        valor_requerido_cop=valor_cop,
         objeto_requerido=tender_experience.objeto if tender_experience.objeto not in ("None", "", None) else None,
         rups_evaluados=[],
         rups_cumplen=[r.rup_elegido for r in resultados if r.cumple and r.rup_elegido is not None],

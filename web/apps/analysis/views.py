@@ -569,6 +569,45 @@ def export_text(request, pk):
     return response
 
 
+def export_context(request, pk):
+    """
+    Descarga el contexto RAW del retriever usado para la evaluacion (indicadores + experiencia).
+    """
+    session = get_object_or_404(AnalysisSession, pk=pk)
+
+    try:
+        result = session.result
+    except AnalysisResult.DoesNotExist:
+        messages.error(request, 'No hay resultados para exportar.')
+        return redirect('analysis:results', pk=pk)
+
+    lines = []
+    lines.append('=' * 70)
+    lines.append('TENDERMOD — CONTEXTO DEL RETRIEVER (RAG)')
+    lines.append('=' * 70)
+    lines.append(f'Sesion ID   : {session.pk}')
+    lines.append(f'PDF         : {session.pdf_filename}')
+    lines.append(f'Fecha       : {session.created_at.strftime("%Y-%m-%d %H:%M")}')
+    lines.append('')
+    lines.append('-' * 70)
+    lines.append('CONTEXTO — INDICADORES FINANCIEROS')
+    lines.append('-' * 70)
+    lines.append(result.indicators_context_text or '(sin contexto disponible — use el flujo PDF completo)')
+    lines.append('')
+    lines.append('-' * 70)
+    lines.append('CONTEXTO — EXPERIENCIA')
+    lines.append('-' * 70)
+    lines.append(result.experience_context_text or '(sin contexto disponible — use el flujo PDF completo)')
+    lines.append('')
+    lines.append('=' * 70)
+
+    content = '\n'.join(lines)
+    filename = f'tendermod_contexto_rag_{pk}.txt'
+    response = HttpResponse(content, content_type='text/plain; charset=utf-8')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Vista: Evaluacion Rapida
 # ---------------------------------------------------------------------------

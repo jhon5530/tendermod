@@ -26,14 +26,24 @@ Actividades ejecutadas
 
 
 
+
 Proximos pasos
-- Adicionar fragmentos de texto de experiencia que se tuvo en cuenta para la evaluacion, junto con sus paginas. Esto para que el humano que revise la experiencia tenga rapidamente un punto de comparacion del requerimiento textual del pliego vs el resultado de la evaluacion, esto tambien adicionarlo al .txt descargable.
-- Corregir errores como:
+- 0. Validar:
+       - [ ] (TM) Fase 1:
+        - [ ] Orden por valor para los que cumplan umbral (Proceso FNA Rafa)
+        - [ ] Si hay experiencia general?
+        - [ ] Si hay experiencias especificas?
+        - [ ] Si son las mismas?
+        - [ ] No funcionan esas experiencias especificas
+        - [ ] Análisis semántico.
+- 1. Adicionar fragmentos de texto de experiencia que se tuvo en cuenta para la evaluacion, junto con sus paginas. Esto para que el humano que revise la experiencia tenga rapidamente un punto de comparacion del requerimiento textual del pliego vs el resultado de la evaluacion, esto tambien adicionarlo al .txt descargable.
+- 2. Corregir errores como:
  - No funciona la funcion de evaluar objeto (Pareciera que no busca los resultados mas cercanos al objeto sino que parte por los de mayor valor y cumplimiento de codigos).
+ - No funciona si no evaluo todos los pasos.
  - Adicion de umbral:
-   - Colocar en la interfaz el umbral como un parametro editable en una URL nueva llamada "Configuraciones" en el menu izquierodo dentro de EMPRESA. Este es configuracion de sistema por lo que es el valor por defecto de umbral solo modificable desde aqui.
-   - En la interfaz en la URL http://localhost:8000/analysis/quick/ adicionar tambien un campo para colocar umbral y tenerlo e cuenta unicamente en esta busqueda.
-   - En la interfaz en la URL http://localhost:8000/analysis/1/step2/ adicionar tambien un campo para colocar umbral y tenerlo e cuenta unicamente en esta busqueda.
+- 3. Adicionar modulo requerimientos generales.
+- 4. Entregar un informe general en un word de cumplimiento.
+ 
 
 - Formato de valores en la interfaz grafica
 

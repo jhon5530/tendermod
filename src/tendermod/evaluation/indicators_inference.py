@@ -45,9 +45,9 @@ def get_indicators(user_input: str, k) -> MultipleIndicatorResponse:
 
     except Exception as e:
             print(e)
-            return None
+            return None, ""
 
-    return parsed_response
+    return parsed_response, context_for_query
 
 
 def get_general_info(user_input: str, k) -> MultipleIndicatorResponse:

@@ -37,12 +37,24 @@ def get_experience(user_input: str, k):
     # (patrón "al menos un contrato con X" que puede estar en chunks distintos a la sección general)
     specific_query = "experiencia específica al menos un contrato"
     context_specific = build_context(retriever, chunks, specific_query, k=5)
-    if context_specific and context_specific.strip() not in context_for_query:
-        context_for_query = (
-            context_for_query
-            + "\n\n--- Sección de Experiencia Específica ---\n"
-            + context_specific
+    if context_specific:
+        # Deduplicar a nivel de fragmentos individuales (no comparación de string completo)
+        existing_fragments = set(
+            fragment.strip()
+            for fragment in context_for_query.split(". ")
+            if fragment.strip()
         )
+        new_fragments = [
+            fragment
+            for fragment in context_specific.split(". ")
+            if fragment.strip() and fragment.strip() not in existing_fragments
+        ]
+        if new_fragments:
+            context_for_query = (
+                context_for_query
+                + "\n\n--- Sección de Experiencia Específica ---\n"
+                + ". ".join(new_fragments)
+            )
 
     #after = vectorStore._collection.count()
     #print(f"Context_for_query is: \n{context_for_query}")
@@ -59,7 +71,7 @@ def get_experience(user_input: str, k):
 
     if "sorry" in llm_response.lower():
         print("[get_experience] El retriever no encontró contexto de experiencia relevante")
-        return None
+        return None, ""
 
     # Parsing
     try:
@@ -68,7 +80,7 @@ def get_experience(user_input: str, k):
     except Exception as e:
             print(e)
             response = f'Sorry, I encountered the following error: \n {e}'
-            return None
+            return None, ""
             #parsed_response = {"answer": [{"indicador": "Null", "valor": "Null"}]}
 
-    return parsed_response
+    return parsed_response, context_for_query

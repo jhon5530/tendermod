@@ -40,6 +40,9 @@
         <a href="{% url 'analysis:export_text' pk=session.pk %}" class="btn btn-outline-secondary btn-sm">
             <i class="bi bi-file-earmark-text me-1"></i>Descargar TXT
         </a>
+        <a href="{% url 'analysis:export_context' pk=session.pk %}" class="btn btn-outline-info btn-sm">
+            <i class="bi bi-cpu me-1"></i>Descargar Contexto RAG
+        </a>
         <a href="{% url 'analysis:step2' pk=session.pk %}" class="btn btn-outline-primary btn-sm">
             <i class="bi bi-pencil me-1"></i>Editar evaluacion
         </a>

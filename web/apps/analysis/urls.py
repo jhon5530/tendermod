@@ -15,4 +15,5 @@ urlpatterns = [
     path('<int:pk>/results/', views.analysis_results, name='results'),
     path('<int:pk>/export/excel/', views.export_excel, name='export_excel'),
     path('<int:pk>/export/text/', views.export_text, name='export_text'),
+    path('<int:pk>/export/context/', views.export_context, name='export_context'),
 ]

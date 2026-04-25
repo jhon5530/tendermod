@@ -118,6 +118,8 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 # Keep results for 1 hour
 CELERY_RESULT_EXPIRES = 3600
+# Solo pool: evita fork() que rompe el backend Rust de ChromaDB (SQLITE_READONLY_CANTINIT)
+CELERY_WORKER_POOL = 'solo'
 
 # Logging
 LOGGING = {

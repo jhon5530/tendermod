@@ -28,13 +28,21 @@ def wide_context(document_chunks, relevant_document_chunks, back = -2, front = 3
 
     #OPC 2
     print (f"Cantidad de chunks {len(chunk_list)}")
-    wcc = copy.deepcopy(document_chunks[chunk_list[0] + back])
+    initial_idx = chunk_list[0] + back
+    if initial_idx < 0:
+        initial_idx = chunk_list[0]
+    wcc = copy.deepcopy(document_chunks[initial_idx])
+
+    seen_ids = set()
+    seen_ids.add(initial_idx)
 
     for cn in chunk_list:
-        wcc.page_content = wcc.page_content + document_chunks[cn+back+1].page_content
-        wcc.page_content = wcc.page_content + document_chunks[cn].page_content
-        wcc.page_content = wcc.page_content + document_chunks[cn+front -2].page_content
-        wcc.page_content = wcc.page_content + document_chunks[cn+front -1].page_content
-        wcc.page_content = wcc.page_content + document_chunks[cn+front].page_content
+        for offset_idx in [cn+back+1, cn, cn+front-2, cn+front-1, cn+front]:
+            if offset_idx < 0 or offset_idx >= len(document_chunks):
+                continue
+            if offset_idx in seen_ids:
+                continue
+            seen_ids.add(offset_idx)
+            wcc.page_content = wcc.page_content + document_chunks[offset_idx].page_content
 
     return [wcc]

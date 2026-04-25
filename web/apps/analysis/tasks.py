@@ -56,7 +56,7 @@ def extract_experience_task(self, session_id):
         session.save(update_fields=['celery_task_id', 'updated_at'])
 
         logger.info('Extrayendo requisitos de experiencia para sesion %s', session_id)
-        exp_response = experience_comparation()
+        exp_response, experience_context = experience_comparation()
         connection.close()
 
         if exp_response is None:
@@ -64,6 +64,12 @@ def extract_experience_task(self, session_id):
 
         session.experience_requirements_json = exp_response.model_dump_json()
         session.save(update_fields=['experience_requirements_json', 'updated_at'])
+
+        from apps.core.models import AnalysisResult
+        result, _ = AnalysisResult.objects.get_or_create(session=session)
+        result.experience_context_text = experience_context or ''
+        result.save(update_fields=['experience_context_text'])
+
         logger.info('Requisitos de experiencia extraidos para sesion %s', session_id)
         return {'status': 'ok', 'session_id': session_id}
 
@@ -92,7 +98,7 @@ def extract_indicators_task(self, session_id):
             'Rentabilidades, capacidades, endeudamiento, indices'
         )
         logger.info('Extrayendo indicadores para sesion %s', session_id)
-        ind_response = get_indicators(user_input=query, k=2)
+        ind_response, indicators_context = get_indicators(user_input=query, k=2)
         connection.close()
 
         if ind_response is None:
@@ -100,6 +106,12 @@ def extract_indicators_task(self, session_id):
 
         session.indicators_requirements_json = ind_response.model_dump_json()
         session.save(update_fields=['indicators_requirements_json', 'updated_at'])
+
+        from apps.core.models import AnalysisResult
+        result, _ = AnalysisResult.objects.get_or_create(session=session)
+        result.indicators_context_text = indicators_context or ''
+        result.save(update_fields=['indicators_context_text'])
+
         logger.info('Indicadores extraidos para sesion %s', session_id)
         return {'status': 'ok', 'session_id': session_id}
 
