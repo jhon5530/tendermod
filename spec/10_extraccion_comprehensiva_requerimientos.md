@@ -3,12 +3,20 @@
 > **Contexto.** El sistema extrae 15 ítems de un pliego AMP (CCENEG-094-01-AMP-2026) donde la
 > referencia manual identifica 107. El gap es de 7x. Las causas son estructurales: queries
 > hardcodeadas para pliegos FNA, scope limitado a "habilitantes", schema con 6 categorías fijas,
-> y ausencia de discovery adaptativo. Este spec diseña la solución completa.
+> y ausencia de discovery adaptativo.
+>
+> **Enfoque resuelto:** En lugar de usar ChromaDB/RAG para extraer requerimientos generales,
+> se extrae el texto completo del PDF por capítulos y se envía directamente al LLM. Esto
+> elimina el problema de embedding mismatch entre terminología FNA y AMP, y garantiza cobertura
+> completa del contenido relevante.
+>
+> **Hallazgo crítico:** `doc.get_toc()` (PyMuPDF) retorna `[]` para al menos el pliego FNA
+> (FNA test9.pdf). El TOC nativo NO puede ser la estrategia primaria — necesita fallback robusto.
 >
 > **Archivos clave:**
 > - `src/tendermod/evaluation/schemas.py` (línea 110 — `GeneralRequirement`)
 > - `src/tendermod/evaluation/prompts.py` (línea 266 — `qna_system_message_general_requirements`)
-> - `src/tendermod/evaluation/general_requirements_inference.py` (`HABILITANTES_QUERIES`, `get_general_requirements`)
+> - `src/tendermod/evaluation/general_requirements_inference.py` (`get_general_requirements`)
 > - `web/apps/analysis/tasks.py` (`extract_general_requirements_task`)
 > - `web/apps/analysis/views.py` (`analysis_step2`, `analysis_checklist_save`, `analysis_pliego_qa`)
 > - `web/templates/analysis/step2.html` (checklist por categoría)
@@ -53,15 +61,12 @@
 
 ### Causas raíz cuantificadas
 
-| Causa | Ítems perdidos (estimado) | Solución |
+| Causa | Ítems perdidos (estimado) | Solución propuesta |
 |---|---|---|
-| Queries con terminología 4.1.x FNA — no matchean secciones 2.x/5.x/7.x del AMP | ~50 | Queries dinámicas desde TOC |
-| Scope de prompt = solo "habilitantes" | ~35 | Ampliar scope a todos los tipos |
-| Schema sin categorías CAUSAL_RECHAZO, GARANTIA, EVALUACION | ~35 | Expandir schema |
-| Sin discovery del TOC | ~50 | Pasada 0 (Discovery) |
-
-Las causas se solapan: la misma raíz puede causar múltiples pérdidas. El fix del TOC resuelve el
-problema de queries Y parcialmente el de scope, porque la sección determina el tipo.
+| Queries con terminología 4.1.x FNA — no matchean secciones 2.x/5.x/7.x del AMP | ~50 | Eliminar dependencia de ChromaDB para extracción de requerimientos |
+| Scope de prompt = solo "habilitantes" | ~35 | Ampliar scope en prompts (Fase B) |
+| Schema sin categorías CAUSAL_RECHAZO, GARANTIA, EVALUACION | ~35 | Expandir schema (Fase A) |
+| Fragmentación del contexto (chunks de 512 tokens) | ~15 | Extracción por capítulo completo (Fase C) |
 
 ---
 
@@ -71,8 +76,8 @@ problema de queries Y parcialmente el de scope, porque la sección determina el 
 |---|---|---|---|---|
 | **A** | Expansión del schema (nuevas categorías + campo `tipo`) | 0 directos (habilita B/C) | Bajo | 1–2 h |
 | **B** | Nuevos prompts por tipo de requerimiento | +20–30 (tipos nuevos con prompts actuales) | Medio | 3–4 h |
-| **C** | Queries dinámicas desde TOC (Discovery Pasada 0) | +30–50 (termina de cubrir AMP) | Medio-alto | 1 día |
-| **D** | Extracción multi-pasada por tipo de sección | +10–15 (granularidad y precisión) | Alto | 1–2 días |
+| **C** | Extracción por capítulos completos (reemplaza RAG para esta feature) | +30–60 (termina de cubrir AMP) | Medio-alto | 1 día |
+| **D** | Detección robusta de límites de capítulo (sin TOC nativo) | +10–15 (cobertura total en FNA) | Medio | 4–6 h |
 | **E** | Compatibilidad Django (vistas + templates + migración) | N/A (funcionalidad UI) | Medio | 0.5 día |
 
 Orden de ejecución: A → B → E → C → D. Las fases A y B son bloqueantes para E; C y D son
@@ -159,7 +164,7 @@ válidos. No se requiere migración de datos en SQLite.
 
 > **Por qué.** El prompt actual instruye al LLM a extraer "SOLO requisitos habilitantes" y
 > usar 6 categorías. Ampliando el scope y definiendo los tipos explícitamente se cubre
-> causales de rechazo, garantías y criterios de evaluación sin cambiar la arquitectura RAG.
+> causales de rechazo, garantías y criterios de evaluación sin cambiar la arquitectura.
 
 ### B.1 Reemplazar el system prompt en `prompts.py`
 
@@ -275,30 +280,53 @@ y documentales) related to:
 
 ---
 
-## FASE C — Queries dinámicas desde TOC (Discovery Pasada 0)
+## FASE C — Extracción por capítulos completos (reemplaza RAG para esta feature)
 
-> **Por qué.** La raíz del gap es que `HABILITANTES_QUERIES` usa terminología de pliegos FNA
-> (4.1.x, SARLAFT, etc.) que no matchea embeddings del pliego AMP (2.x, 5.x, 7.x).
-> Extrayendo el TOC del pliego real y generando queries desde sus títulos de sección, el
-> retriever recupera los chunks correctos independientemente del tipo de pliego.
+> **Cambio arquitectónico principal.** La extracción de requerimientos generales deja de
+> usar ChromaDB. En lugar de fragmentar el PDF en chunks de 512 tokens, hacer queries de
+> embeddings y ensamblar contexto parcial, se extrae el texto completo de cada capítulo
+> relevante y se envía directamente al LLM. ChromaDB se mantiene para las otras features
+> (experiencia, indicadores, Q&A sobre el pliego).
+>
+> **Por qué este cambio resuelve el gap:**
+> - **Embedding mismatch eliminado:** queries FNA no encuentran secciones AMP porque los
+>   embeddings de "4.1.1.x cámara comercio" y "5.1.3 certificados" son similares pero no
+>   idénticos. Enviando el texto completo del capítulo, el LLM ve todo.
+> - **Contexto coherente:** un capítulo de 10 páginas es 3K–8K tokens — gpt-4o-mini maneja
+>   hasta 128K. No hay "lost in the middle" porque cada llamada procesa un capítulo.
+> - **Cobertura garantizada:** si el capítulo está en el PDF, está en el contexto del LLM.
 
-### C.1 Extractor de TOC nativo con PyMuPDF
+### C.0 Análisis del presupuesto de tokens
 
-**Archivo nuevo:** `src/tendermod/ingestion/toc_extractor.py`
+| Tipo de pliego | Páginas totales | Tokens totales (est.) | Capítulos relevantes | Tokens por capítulo |
+|---|---|---|---|---|
+| FNA test9.pdf | ~90 páginas | ~97K tokens | 3–5 capítulos | 5K–20K tokens |
+| AMP CCENEG-094 (~120 páginas) | ~120 páginas | ~130K tokens | 5–7 capítulos | 5K–25K tokens |
+| Pliego grande (~250 páginas) | ~250 páginas | ~270K tokens | 8–12 capítulos | 5K–30K tokens |
 
-PyMuPDF expone `doc.get_toc()` que devuelve `[(level, title, page), ...]`. Para pliegos
-bien estructurados (mayoría de AMPs de Colombia Compra Eficiente), esto resuelve el 80%
-del problema sin llamada LLM adicional.
+**Estrategia recomendada:** extracción por capítulo (no documento completo). Incluso para
+pliegos de 250 páginas, cada capítulo cabe dentro de los 128K de gpt-4o-mini. El documento
+completo supera el límite a partir de ~120 páginas.
+
+**Costo estimado:** 1 llamada LLM por capítulo relevante. Para un pliego típico (5–7 capítulos),
+esto representa 5–7 llamadas vs. 1 llamada actual. El costo sube ~5x pero la cobertura pasa
+de 14% a ≥80%.
+
+### C.1 Nuevo archivo: `chapter_extractor.py`
+
+**Archivo nuevo:** `src/tendermod/ingestion/chapter_extractor.py`
 
 ```python
-"""Extrae la Tabla de Contenido del pliego para generar queries de retrieval adaptativas.
+"""
+Extrae texto del PDF por rangos de página para extracción de requerimientos sin RAG.
 
-Estrategia dual:
-1. Primero intenta PyMuPDF doc.get_toc() (gratuito, instantáneo).
-2. Si el TOC nativo está vacío (PDF mal estructurado), envía las primeras 6 páginas
-   al LLM para que identifique las secciones con requerimientos.
+Estrategia de detección de límites de capítulo (en orden de prioridad):
+1. TOC nativo de PyMuPDF (doc.get_toc()) — instantáneo, sin costo LLM.
+2. LLM sobre primeras páginas — cuando el PDF no tiene outline nativo (ej. FNA test9.pdf).
+3. Heurística de texto — fallback final para PDFs sin TOC visible en primeras páginas.
 """
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -306,350 +334,550 @@ import fitz  # PyMuPDF
 
 logger = logging.getLogger(__name__)
 
-# Secciones que típicamente contienen requerimientos en pliegos colombianos.
-# Se usan como fallback cuando el TOC nativo está vacío.
-REQUIREMENT_SECTION_KEYWORDS = [
+# Keywords que indican secciones con requerimientos en pliegos colombianos.
+REQUIREMENT_KEYWORDS = [
     "habilitante", "requisito", "rechazo", "causal", "garantía", "póliza",
     "evaluación", "puntaje", "capacidad", "experiencia", "jurídico", "técnico",
-    "financiero", "documental", "formulario", "formato", "anexo",
+    "financiero", "documental", "formulario", "formato", "anexo", "criterio",
 ]
 
+# Patrón heurístico para detectar títulos de sección en el texto del PDF.
+# Detecta líneas que comienzan con un numeral como "2.", "2.3", "2.3.1", "CAPÍTULO 2".
+_SECTION_HEADER_PATTERN = re.compile(
+    r"^(?:CAPÍTULO\s+\d+|CAPITULO\s+\d+|\d+(?:\.\d+){0,3})\s+\S",
+    re.MULTILINE | re.IGNORECASE,
+)
 
-def extract_toc_native(pdf_path: str) -> list[dict]:
-    """Extrae el TOC usando el outline nativo del PDF (PyMuPDF)."""
+
+def extract_page_range(pdf_path: str, start_page: int, end_page: int) -> str:
+    """Extrae el texto de las páginas [start_page, end_page) del PDF (índice 0-based)."""
     doc = fitz.open(pdf_path)
-    toc = doc.get_toc()  # [(level, title, page), ...]
+    pages = []
+    for i in range(start_page, min(end_page, len(doc))):
+        pages.append(doc[i].get_text())
     doc.close()
-
-    if not toc:
-        logger.info("[toc_extractor] TOC nativo vacío en %s", pdf_path)
-        return []
-
-    result = []
-    for level, title, page in toc:
-        result.append({
-            "level": level,
-            "title": title.strip(),
-            "page": page,
-            "number": _extract_number(title),
-        })
-    logger.info("[toc_extractor] TOC nativo: %d entradas desde %s", len(result), pdf_path)
-    return result
+    return "\n".join(pages)
 
 
-def extract_toc_llm(pdf_path: str, llm_client, n_pages: int = 6) -> list[dict]:
-    """Extrae el TOC enviando las primeras n_pages al LLM (fallback)."""
+def extract_full_text(pdf_path: str) -> str:
+    """Extrae el texto completo del PDF página por página."""
     doc = fitz.open(pdf_path)
-    pages_text = "\n".join(
-        doc[i].get_text() for i in range(min(n_pages, len(doc)))
-    )
+    pages = [doc[i].get_text() for i in range(len(doc))]
     doc.close()
-
-    from tendermod.evaluation.prompts import TOC_EXTRACTION_SYSTEM, TOC_EXTRACTION_USER
-    from tendermod.evaluation.llm_client import run_llm_raw_json
-
-    result = run_llm_raw_json(
-        system=TOC_EXTRACTION_SYSTEM,
-        user=TOC_EXTRACTION_USER.format(pages_text=pages_text),
-    )
-    logger.info("[toc_extractor] TOC LLM: %d entradas", len(result))
-    return result
+    return "\n".join(pages)
 
 
-def get_toc(pdf_path: str, llm_client=None) -> list[dict]:
-    """Punto de entrada: TOC nativo; si está vacío, LLM fallback."""
-    toc = extract_toc_native(pdf_path)
-    if toc:
-        return toc
-    if llm_client is None:
-        logger.warning("[toc_extractor] TOC vacío y sin llm_client — usando queries fallback")
-        return []
-    return extract_toc_llm(pdf_path, llm_client)
-
-
-def toc_to_queries(toc: list[dict]) -> list[str]:
-    """Convierte entradas del TOC en queries de retrieval.
-
-    Filtra solo secciones con keywords de requerimientos y construye
-    queries que combinan el numeral + título de sección.
+def get_chapter_ranges_native(pdf_path: str) -> list[dict]:
     """
+    Obtiene rangos de capítulo usando el TOC nativo del PDF.
+    Retorna lista de {'title': str, 'start_page': int, 'end_page': int}.
+    Retorna [] si el PDF no tiene TOC nativo.
+    """
+    doc = fitz.open(pdf_path)
+    toc = doc.get_toc()    # [(level, title, page_1based), ...]
+    n_pages = len(doc)
+    doc.close()
+
     if not toc:
+        logger.info("[chapter_extractor] TOC nativo vacío en %s", pdf_path)
         return []
 
-    queries = []
-    for entry in toc:
-        title_lower = entry["title"].lower()
-        is_relevant = any(kw in title_lower for kw in REQUIREMENT_SECTION_KEYWORDS)
-        if is_relevant:
-            number = entry.get("number", "")
-            query = f"{number} {entry['title']}".strip()
-            queries.append(query)
+    # Convertir TOC a rangos (start, end) — página 0-based.
+    entries = [{"title": t, "start": p - 1} for _, t, p in toc]
+    chapters = []
+    for i, entry in enumerate(entries):
+        end = entries[i + 1]["start"] if i + 1 < len(entries) else n_pages
+        chapters.append({
+            "title": entry["title"],
+            "start_page": entry["start"],
+            "end_page": end,
+        })
 
-    logger.info("[toc_extractor] %d queries generadas desde TOC (%d entradas totales)",
-                len(queries), len(toc))
-    return queries
+    logger.info("[chapter_extractor] TOC nativo: %d capítulos en %s", len(chapters), pdf_path)
+    return chapters
 
 
-def _extract_number(title: str) -> str:
-    """Extrae el numeral de un título de sección. Ej: '2.23.1 Causales de rechazo' -> '2.23.1'"""
-    import re
-    match = re.match(r"^\s*(\d+(?:\.\d+)*)\s*", title)
-    return match.group(1) if match else ""
+def get_chapter_ranges_llm(pdf_path: str, n_pages_scan: int = 10) -> list[dict]:
+    """
+    Detecta capítulos enviando las primeras n_pages_scan páginas al LLM.
+    Usado cuando el TOC nativo está vacío (ej. FNA test9.pdf).
+    Retorna lista de {'title': str, 'start_page': int, 'end_page': int}.
+    """
+    doc = fitz.open(pdf_path)
+    n_total = len(doc)
+    first_pages_text = "\n".join(
+        f"[Página {i + 1}]\n{doc[i].get_text()}"
+        for i in range(min(n_pages_scan, n_total))
+    )
+    doc.close()
+
+    from tendermod.evaluation.llm_client import run_llm_chapter_detection
+    chapters_raw = run_llm_chapter_detection(first_pages_text, n_total)
+
+    # chapters_raw es una lista de {'title': str, 'start_page': int (1-based), 'end_page': int (1-based)}
+    # Convertir a 0-based.
+    chapters = []
+    for ch in chapters_raw:
+        chapters.append({
+            "title": ch.get("title", ""),
+            "start_page": max(0, ch.get("start_page", 1) - 1),
+            "end_page": min(n_total, ch.get("end_page", n_total)),
+        })
+
+    logger.info("[chapter_extractor] LLM detectó %d capítulos en %s", len(chapters), pdf_path)
+    return chapters
+
+
+def get_chapter_ranges_heuristic(pdf_path: str) -> list[dict]:
+    """
+    Detecta capítulos por heurística de texto: busca líneas que comiencen con
+    numerales de sección o la palabra CAPÍTULO.
+    Fallback de último recurso — menos preciso que LLM pero sin costo adicional.
+    """
+    doc = fitz.open(pdf_path)
+    n_pages = len(doc)
+    boundaries = []
+    for i in range(n_pages):
+        text = doc[i].get_text()
+        if _SECTION_HEADER_PATTERN.search(text):
+            # Encontrar el primer match para usar como título aproximado.
+            match = _SECTION_HEADER_PATTERN.search(text)
+            if match:
+                title = match.group(0).strip()[:80]
+                boundaries.append({"title": title, "start_page": i})
+    doc.close()
+
+    if not boundaries:
+        # Sin estructura detectable: tratar todo el documento como un solo bloque.
+        logger.warning("[chapter_extractor] Heurística no detectó estructura en %s — bloque único", pdf_path)
+        return [{"title": "Documento completo", "start_page": 0, "end_page": n_pages}]
+
+    chapters = []
+    for i, b in enumerate(boundaries):
+        end = boundaries[i + 1]["start_page"] if i + 1 < len(boundaries) else n_pages
+        chapters.append({
+            "title": b["title"],
+            "start_page": b["start_page"],
+            "end_page": end,
+        })
+    logger.info("[chapter_extractor] Heurística: %d capítulos en %s", len(chapters), pdf_path)
+    return chapters
+
+
+def get_chapter_ranges(pdf_path: str, use_llm: bool = True) -> list[dict]:
+    """
+    Punto de entrada unificado. Intentos en orden:
+    1. TOC nativo (gratuito, instantáneo).
+    2. LLM sobre primeras páginas (si use_llm=True).
+    3. Heurística de texto (siempre disponible).
+    """
+    chapters = get_chapter_ranges_native(pdf_path)
+    if chapters:
+        return chapters
+
+    if use_llm:
+        try:
+            chapters = get_chapter_ranges_llm(pdf_path)
+            if chapters:
+                return chapters
+        except Exception as exc:
+            logger.warning("[chapter_extractor] LLM fallback falló: %s — usando heurística", exc)
+
+    return get_chapter_ranges_heuristic(pdf_path)
+
+
+def filter_relevant_chapters(chapters: list[dict]) -> list[dict]:
+    """
+    Filtra capítulos que probablemente contengan requerimientos,
+    usando REQUIREMENT_KEYWORDS en el título.
+    """
+    relevant = [
+        ch for ch in chapters
+        if any(kw in ch["title"].lower() for kw in REQUIREMENT_KEYWORDS)
+    ]
+    if not relevant:
+        # Si ningún título matchea, incluir todos (el pliego puede usar títulos atípicos).
+        logger.warning(
+            "[chapter_extractor] Ningún capítulo con keywords de requerimiento — incluyendo todos"
+        )
+        return chapters
+    logger.info(
+        "[chapter_extractor] %d/%d capítulos relevantes seleccionados",
+        len(relevant), len(chapters),
+    )
+    return relevant
 ```
 
-### C.2 Prompts para TOC LLM fallback
+### C.2 Nuevas funciones en `llm_client.py`
+
+**Archivo:** `src/tendermod/evaluation/llm_client.py`
+
+Agregar dos funciones al final del archivo:
+
+```python
+def run_llm_chapter_detection(pages_text: str, total_pages: int) -> list[dict]:
+    """
+    Llama al LLM para detectar capítulos y sus rangos de página desde las primeras
+    páginas del PDF. Retorna lista de dicts con title, start_page, end_page (1-based).
+    """
+    from tendermod.evaluation.prompts import (
+        CHAPTER_DETECTION_SYSTEM,
+        CHAPTER_DETECTION_USER,
+    )
+    import json
+
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    user_content = CHAPTER_DETECTION_USER.replace("{pages_text}", pages_text).replace(
+        "{total_pages}", str(total_pages)
+    )
+    messages = [
+        SystemMessage(content=CHAPTER_DETECTION_SYSTEM),
+        HumanMessage(content=user_content),
+    ]
+    response = llm.invoke(messages)
+    raw = response.content.strip()
+
+    # Limpiar markdown si viene envuelto
+    if raw.startswith("```"):
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw)
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.error("[run_llm_chapter_detection] JSON inválido: %s — raw: %s", exc, raw[:200])
+        return []
+
+
+def run_llm_requirements_from_chapter(chapter_text: str, chapter_title: str) -> "GeneralRequirementList":
+    """
+    Extrae requerimientos de un capítulo completo del pliego.
+    Igual que run_llm_general_requirements pero con prompt adaptado a capítulo único.
+    """
+    from tendermod.evaluation.schemas import GeneralRequirementList
+    from tendermod.evaluation.prompts import (
+        qna_system_message_general_requirements,
+        qna_user_message_general_requirements,
+    )
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    structured_llm = llm.with_structured_output(GeneralRequirementList)
+    user_content = (
+        qna_user_message_general_requirements
+        .replace("{context}", chapter_text)
+        .replace("{question}", f"requerimientos en el capítulo: {chapter_title}")
+    )
+    messages = [
+        SystemMessage(content=qna_system_message_general_requirements),
+        HumanMessage(content=user_content),
+    ]
+    return structured_llm.invoke(messages)
+```
+
+Agregar `import re` si no existe en `llm_client.py`.
+
+### C.3 Nuevos prompts en `prompts.py`
 
 **Archivo:** `src/tendermod/evaluation/prompts.py` (agregar al final)
 
 ```python
-TOC_EXTRACTION_SYSTEM = """Eres un extractor de estructura de documentos de licitación pública
-colombiana. Se te darán las primeras páginas de un pliego de condiciones.
-Extrae TODAS las entradas de la tabla de contenido (índice) que correspondan a secciones
-con requerimientos, habilitantes, causales de rechazo, garantías, evaluación o documentos.
+CHAPTER_DETECTION_SYSTEM = """Eres un extractor de estructura de documentos de licitación
+pública colombiana. Se te darán las primeras páginas de un pliego de condiciones.
+Tu tarea es identificar TODOS los capítulos o secciones principales del documento con sus
+rangos de página.
 
-Devuelve ÚNICAMENTE JSON válido con esta estructura:
+Devuelve ÚNICAMENTE JSON válido con esta estructura (páginas en base 1):
 [
-  {"level": 1, "title": "CAPÍTULO 2 — CONDICIONES DEL PROCESO", "page": 10, "number": "2"},
-  {"level": 2, "title": "2.23 Causales de rechazo de la oferta", "page": 45, "number": "2.23"},
-  {"level": 3, "title": "2.23.1 No presentar la oferta en el formulario habilitado", "page": 45, "number": "2.23.1"}
+  {"title": "CAPÍTULO 1 — GENERALIDADES DEL PROCESO", "start_page": 1, "end_page": 9},
+  {"title": "2. CONDICIONES DEL PROCESO", "start_page": 10, "end_page": 55},
+  {"title": "2.23 Causales de rechazo de la oferta", "start_page": 45, "end_page": 55},
+  {"title": "5. HABILITANTES Y EVALUACIÓN", "start_page": 56, "end_page": 95}
 ]
 
-IMPORTANTE: Solo JSON. Sin texto adicional. Sin markdown."""
+REGLAS:
+- Incluir tanto capítulos principales (nivel 1) como subsecciones importantes (nivel 2–3)
+  que contengan: habilitantes, requisitos, causales de rechazo, garantías, evaluación.
+- Si el índice del documento menciona páginas exactas, usar esas páginas.
+- Si no hay página exacta visible, estimar razonablemente.
+- El campo end_page es EXCLUSIVO — la sección termina ANTES de esa página.
+- SOLO JSON. Sin texto adicional. Sin markdown."""
 
-TOC_EXTRACTION_USER = """Páginas iniciales del pliego:
+CHAPTER_DETECTION_USER = """Total de páginas del documento: {total_pages}
+
+Primeras páginas del pliego (donde suele estar el índice/tabla de contenido):
 
 {pages_text}
 
-Extrae la tabla de contenido."""
+Identifica todos los capítulos y secciones con sus rangos de página."""
 ```
 
-### C.3 Integrar TOC en `get_general_requirements`
+### C.4 Reemplazar `get_general_requirements` en `general_requirements_inference.py`
 
 **Archivo:** `src/tendermod/evaluation/general_requirements_inference.py`
 
+Reemplazar la función `get_general_requirements` con la versión basada en capítulos.
+Conservar las imports existentes y añadir las nuevas. La función `ask_pliego` NO cambia
+(sigue usando ChromaDB para Q&A interactivo).
+
 ```python
-# Queries de fallback — se usan cuando el TOC está vacío (pliegos sin outline nativo
-# y sin llm_client para el fallback LLM del TOC).
-# Cubren terminología de pliegos FNA (4.1.x) Y terminología AMP Colombia Compra Eficiente (2.x, 5.x, 7.x).
-FALLBACK_QUERIES: list[str] = [
-    # -- Causales de rechazo (AMP 2.23.x) --
-    "causal rechazo oferta propuesta inhábil inadmisible",
-    "rechazo automático oferta no subsanable",
-    # -- Jurídicos (FNA 4.1.1.x / AMP 5.1.x) --
-    "carta presentación propuesta firma representante legal declaración juramento",
-    "certificado existencia representación legal cámara comercio objeto social",
-    "registro único proponentes RUP inscripción vigente firme",
-    "garantía seriedad oferta póliza valor presupuesto oficial",
-    "antecedentes fiscales disciplinarios judiciales contraloría procuraduría policía",
-    "compromiso anticorrupción transparencia lavado activos SARLAFT",
-    "habeas data autorización tratamiento datos personales",
-    "seguridad social parafiscales aportes salud pensión ARL",
-    # -- Garantías (AMP 5.1.9 / FNA) --
-    "póliza garantía cumplimiento estabilidad responsabilidad civil calidad",
-    "amparo cobertura garantía única asegurado beneficiario",
-    # -- Técnicos (FNA 4.1.2.x / AMP 5.4) --
-    "certificación fabricante distribuidor partner canal autorizado solución",
-    "personal mínimo requerido perfiles profesional especialista certificaciones",
-    "norma técnica ISO IEC NIST certificación acreditación sistema gestión",
-    "manifestación aceptación requerimientos mínimos obligatorios anexo técnico",
-    # -- Financieros (AMP 5.2.1 / FNA 4.1.3) --
-    "patrimonio líquido capital de trabajo monto mínimo requerido",
-    "ROA ROE indicador financiero habilitante valor mínimo exigido",
-    # -- Evaluación/Ponderables (AMP 7.x) --
-    "criterio evaluación puntaje puntos asignación técnico económico",
-    "industria nacional MiPymes mujeres diferencial puntaje adicional",
-    "propuesta económica precio evaluación económica ponderación",
-]
+import logging
+import glob
+from pathlib import Path
 
+from tendermod.config.settings import CHROMA_PERSIST_DIR
+from tendermod.evaluation.llm_client import (
+    run_llm_general_requirements,
+    run_llm_requirements_from_chapter,
+    run_llm_indices,
+)
+from tendermod.evaluation.prompts import (
+    PLIEGO_QA_SYSTEM_PROMPT,
+    qna_user_message_pliego_qa,
+)
+from tendermod.evaluation.schemas import GeneralRequirementList, GeneralRequirement
+from tendermod.ingestion.chapter_extractor import (
+    get_chapter_ranges,
+    filter_relevant_chapters,
+    extract_page_range,
+)
+from tendermod.ingestion.chunking import chunk_docs
+from tendermod.ingestion.pdf_loader import load_docs
+from tendermod.retrieval.embeddings import embed_docs
+from tendermod.retrieval.retriever import create_retriever_experience
+from tendermod.retrieval.vectorstore import read_vectorstore
+from tendermod.retrieval.context_builder import build_context
 
-def get_general_requirements(k: int = 3) -> GeneralRequirementList:
-    docs = load_docs()
-    all_chunks = chunk_docs(docs)
+logger = logging.getLogger(__name__)
 
-    vectorstore = read_vectorstore(embed_docs(), path=CHROMA_PERSIST_DIR)
-    retriever = create_retriever_experience(vectorstore, k=k)
-
-    # --- PASADA 0: Discovery del TOC ---
-    pdf_path = _get_pdf_path()   # helper que retorna el path del PDF actual en data/
-    try:
-        from tendermod.ingestion.toc_extractor import get_toc, toc_to_queries
-        toc = get_toc(pdf_path)
-        dynamic_queries = toc_to_queries(toc)
-    except Exception as exc:
-        logger.warning("[get_general_requirements] Error extrayendo TOC: %s — usando fallback", exc)
-        dynamic_queries = []
-
-    # Combinar queries dinámicas (TOC) con fallback (cubre pliegos sin TOC)
-    queries = dynamic_queries if dynamic_queries else FALLBACK_QUERIES
-    # Siempre agregar fallback si las queries dinámicas son < 5 (TOC parcial)
-    if len(dynamic_queries) < 5:
-        queries = list(dict.fromkeys(dynamic_queries + FALLBACK_QUERIES))  # deduplica preservando orden
-
-    # --- PASADA 1: Retrieval y extracción ---
-    retrieved_ids: set[int] = set()
-    for query in queries:
-        for doc in retriever.invoke(query):
-            cid = doc.metadata.get("chunk_id")
-            if cid is not None:
-                retrieved_ids.add(cid)
-
-    if not retrieved_ids:
-        logger.warning("[get_general_requirements] No se recuperaron chunks del vectorstore")
-        return GeneralRequirementList(requisitos=[])
-
-    # Expandir vecinos y ordenar por posición en el documento
-    expanded: set[int] = set()
-    for cid in retrieved_ids:
-        for offset in range(-_NEIGHBOR_BACK, _NEIGHBOR_FRONT + 1):
-            neighbor = cid + offset
-            if 0 <= neighbor < len(all_chunks):
-                expanded.add(neighbor)
-
-    context_parts = [all_chunks[i].page_content for i in sorted(expanded)]
-    combined_context = "\n".join(context_parts)
-
-    logger.info(
-        "[get_general_requirements] %d queries → %d chunks únicos → %d con vecinos → %d chars (~%d tokens)",
-        len(queries),
-        len(retrieved_ids),
-        len(expanded),
-        len(combined_context),
-        len(combined_context) // 4,
-    )
-
-    try:
-        parsed = run_llm_general_requirements(combined_context, _QA_QUERY)
-    except Exception as exc:
-        logger.error("[get_general_requirements] Error llamando LLM: %s", exc)
-        return GeneralRequirementList(requisitos=[])
-
-    logger.info("[get_general_requirements] Extraidos %d requisitos", len(parsed.requisitos))
-    return parsed
+# Límite de tokens por capítulo antes de enviar al LLM.
+# gpt-4o-mini soporta 128K; dejamos margen para system prompt + output.
+_MAX_CHAPTER_TOKENS = 90_000
+_MAX_CHAPTER_CHARS = _MAX_CHAPTER_TOKENS * 4   # aprox 4 chars/token
 
 
 def _get_pdf_path() -> str:
-    """Retorna el path del primer PDF encontrado en TENDERMOD_DATA_DIR."""
-    import glob
-    from tendermod.config.settings import REDNEET_DB_PERSIST_DIR
-    # DATA_DIR está un nivel arriba de REDNEET_DB_PERSIST_DIR
-    data_dir = str(REDNEET_DB_PERSIST_DIR).replace("/redneet_db", "")
-    pdfs = glob.glob(f"{data_dir}/*.pdf")
+    """Retorna el path del primer PDF encontrado en data/."""
+    chroma_path = Path(CHROMA_PERSIST_DIR)
+    data_dir = chroma_path.parent   # data/chroma -> data/
+    pdfs = list(data_dir.glob("*.pdf"))
     if not pdfs:
         raise FileNotFoundError(f"No se encontró PDF en {data_dir}")
-    return pdfs[0]
+    return str(pdfs[0])
+
+
+def get_general_requirements(k: int = 3) -> GeneralRequirementList:
+    """
+    Extrae requerimientos generales del pliego por capítulos completos.
+
+    Flujo:
+    1. Detectar capítulos del PDF (TOC nativo → LLM → heurística).
+    2. Filtrar capítulos relevantes (por keywords en título).
+    3. Por cada capítulo, extraer texto y llamar al LLM.
+    4. Hacer merge deduplicando por (seccion, descripcion[:60]).
+    """
+    pdf_path = _get_pdf_path()
+
+    chapters = get_chapter_ranges(pdf_path, use_llm=True)
+    relevant_chapters = filter_relevant_chapters(chapters)
+
+    if not relevant_chapters:
+        logger.warning("[get_general_requirements] No se detectaron capítulos relevantes")
+        return GeneralRequirementList(requisitos=[])
+
+    all_requisitos: list[GeneralRequirement] = []
+    seen: set[tuple] = set()
+    next_id = 1
+
+    for chapter in relevant_chapters:
+        title = chapter["title"]
+        start = chapter["start_page"]
+        end = chapter["end_page"]
+        n_pages = end - start
+
+        chapter_text = extract_page_range(pdf_path, start, end)
+        n_chars = len(chapter_text)
+        n_tokens_est = n_chars // 4
+
+        logger.info(
+            "[get_general_requirements] Capítulo '%s' (pág %d–%d, ~%d tokens)",
+            title, start + 1, end, n_tokens_est,
+        )
+
+        if n_chars > _MAX_CHAPTER_CHARS:
+            # Capítulo demasiado largo: dividir en sub-bloques de 90K tokens.
+            sub_size = _MAX_CHAPTER_CHARS
+            sub_blocks = [
+                chapter_text[i: i + sub_size]
+                for i in range(0, n_chars, sub_size)
+            ]
+            logger.info(
+                "[get_general_requirements] Capítulo grande → %d sub-bloques", len(sub_blocks)
+            )
+        else:
+            sub_blocks = [chapter_text]
+
+        for block in sub_blocks:
+            try:
+                partial = run_llm_requirements_from_chapter(block, title)
+            except Exception as exc:
+                logger.error(
+                    "[get_general_requirements] Error en capítulo '%s': %s", title, exc
+                )
+                continue
+
+            for req in partial.requisitos:
+                key = (req.seccion, req.descripcion[:60].lower())
+                if key not in seen:
+                    seen.add(key)
+                    req.id = next_id
+                    next_id += 1
+                    all_requisitos.append(req)
+
+    logger.info(
+        "[get_general_requirements] %d capítulos → %d requerimientos únicos",
+        len(relevant_chapters), len(all_requisitos),
+    )
+    return GeneralRequirementList(requisitos=all_requisitos)
+
+
+def ask_pliego(question: str, k: int = 8) -> str:
+    """Responde preguntas en lenguaje natural sobre el pliego. Retorna string."""
+    docs = load_docs()
+    chunks = chunk_docs(docs)
+
+    vectorstore = read_vectorstore(embed_docs(), path=CHROMA_PERSIST_DIR)
+    retriever = create_retriever_experience(vectorstore, k)
+
+    context_for_query = build_context(retriever, chunks, question, k=k)
+
+    user_message = qna_user_message_pliego_qa
+    user_message = user_message.replace("{context}", context_for_query)
+    user_message = user_message.replace("{question}", question)
+
+    response = run_llm_indices(PLIEGO_QA_SYSTEM_PROMPT, user_message)
+    return response
 ```
 
-**Nota sobre `_get_pdf_path`:** la ruta correcta de `data/` debe derivarse desde
-`settings.py`. Si `settings.py` expone una constante `DATA_DIR`, usarla directamente.
-Ajustar según el valor real de `CHROMA_PERSIST_DIR` (`./data/chroma` → `./data`).
+**Nota importante:** `ask_pliego` conserva ChromaDB/RAG porque el Q&A interactivo se beneficia
+del retrieval semántico (no necesita cobertura total del documento, sino respuesta precisa).
 
 **Criterios de aceptación de Fase C:**
-- [ ] Para CCENEG-094-01-AMP-2026: `get_toc()` devuelve ≥20 entradas incluyendo sección 2.23.x.
-- [ ] `toc_to_queries()` produce queries que incluyen "2.23 Causales de rechazo" y "5.1 Habilitantes".
-- [ ] Para pliego FNA-VTTD-CP-002-2026: como el TOC nativo puede devolver entradas con terminología diferente, el fallback se activa y las 24 queries existentes cubren el pliego (regresión no rota).
-- [ ] El log muestra "N queries generadas desde TOC (M entradas totales)".
+- [ ] Para FNA test9.pdf (sin TOC nativo): `get_chapter_ranges_native` retorna `[]`, el LLM fallback detecta al menos 5 capítulos con sus páginas.
+- [ ] Para CCENEG-094-01-AMP-2026 (con TOC nativo): `get_chapter_ranges_native` retorna ≥15 entradas incluyendo sección 2.23.x y 5.1.x.
+- [ ] `filter_relevant_chapters` selecciona al menos las secciones de habilitantes, causales y evaluación en ambos pliegos.
+- [ ] El log muestra "N capítulos → M requerimientos únicos" con M > 50 para el pliego AMP.
+- [ ] No hay `ValidationError` en ninguna llamada LLM.
 
 ---
 
-## FASE D — Extracción multi-pasada por tipo de sección
+## FASE D — Detección robusta de límites de capítulo sin TOC nativo
 
-> **Por qué.** Con TOC dinámico, el retriever recupera los chunks correctos pero los envía
-> todos al LLM en un solo contexto combinado. Para secciones densas (22 causales de rechazo),
-> el LLM puede omitir ítems por límite de contexto. La extracción por sección garantiza
-> completitud.
+> **Por qué.** La Fase C asume que el LLM puede detectar capítulos desde las primeras páginas.
+> Para pliegos donde el índice es poco claro o está en páginas internas, la detección puede
+> fallar o producir rangos incorrectos. Esta fase añade validación y mejora la heurística.
 
-### D.1 Extracción dirigida por sección del TOC
+### D.1 Validación de rangos de capítulo
 
-**Archivo:** `src/tendermod/evaluation/general_requirements_inference.py`
-
-Agregar función `get_general_requirements_v2` que reemplaza progresivamente a
-`get_general_requirements`. La función existente se mantiene como fallback.
+Agregar a `chapter_extractor.py`:
 
 ```python
-def get_general_requirements_v2(k: int = 5) -> GeneralRequirementList:
+def validate_chapter_ranges(chapters: list[dict], n_total_pages: int) -> list[dict]:
     """
-    Extracción en dos pasadas:
-    Pasada 0: TOC -> lista de secciones con requerimientos
-    Pasada 1: por cada sección, retrieval dirigido + extracción LLM parcial
-    Merge final: deduplicar por (seccion, descripcion[:50])
+    Valida y corrige rangos detectados:
+    - Clamp al rango [0, n_total_pages].
+    - Eliminar capítulos con start >= end (vacíos).
+    - Ordenar por start_page.
+    - Si dos capítulos se solapan, recortar el anterior.
     """
-    docs = load_docs()
-    all_chunks = chunk_docs(docs)
-    vectorstore = read_vectorstore(embed_docs(), path=CHROMA_PERSIST_DIR)
-    retriever = create_retriever_experience(vectorstore, k=k)
+    valid = []
+    for ch in chapters:
+        start = max(0, min(ch.get("start_page", 0), n_total_pages - 1))
+        end = max(start + 1, min(ch.get("end_page", n_total_pages), n_total_pages))
+        valid.append({**ch, "start_page": start, "end_page": end})
 
-    pdf_path = _get_pdf_path()
-    toc = get_toc(pdf_path)
-    section_queries = toc_to_queries(toc) if toc else FALLBACK_QUERIES
+    valid.sort(key=lambda c: c["start_page"])
 
-    all_requisitos: list[GeneralRequirement] = []
-    seen: set[tuple] = set()           # (seccion, descripcion_prefix)
-    next_id = 1
+    # Recortar solapamientos.
+    for i in range(len(valid) - 1):
+        if valid[i]["end_page"] > valid[i + 1]["start_page"]:
+            valid[i]["end_page"] = valid[i + 1]["start_page"]
 
-    for query in section_queries:
-        # Retrieval dirigido por sección
-        retrieved_ids: set[int] = set()
-        for doc in retriever.invoke(query):
-            cid = doc.metadata.get("chunk_id")
-            if cid is not None:
-                retrieved_ids.add(cid)
-
-        if not retrieved_ids:
-            continue
-
-        # Expandir vecinos (ventana más estrecha para extracción dirigida)
-        expanded: set[int] = set()
-        for cid in retrieved_ids:
-            for offset in range(-1, 3):   # -1 a +2 (ventana reducida)
-                neighbor = cid + offset
-                if 0 <= neighbor < len(all_chunks):
-                    expanded.add(neighbor)
-
-        context = "\n".join(all_chunks[i].page_content for i in sorted(expanded))
-
-        try:
-            partial = run_llm_general_requirements(context, query)
-        except Exception as exc:
-            logger.warning("[get_general_requirements_v2] Error en sección '%s': %s", query, exc)
-            continue
-
-        # Merge con deduplicación
-        for req in partial.requisitos:
-            key = (req.seccion, req.descripcion[:50])
-            if key not in seen:
-                seen.add(key)
-                req.id = next_id
-                next_id += 1
-                all_requisitos.append(req)
-
-    logger.info("[get_general_requirements_v2] Total: %d requisitos tras merge", len(all_requisitos))
-    return GeneralRequirementList(requisitos=all_requisitos)
+    return [ch for ch in valid if ch["start_page"] < ch["end_page"]]
 ```
 
-### D.2 Activar v2 en la task de Celery
-
-**Archivo:** `web/apps/analysis/tasks.py` (función `extract_general_requirements_task`)
+Integrar en `get_chapter_ranges`:
 
 ```python
-# Cambiar línea 59:
-# ANTES:
-req_list = get_general_requirements(k=15)
+def get_chapter_ranges(pdf_path: str, use_llm: bool = True) -> list[dict]:
+    doc = fitz.open(pdf_path)
+    n_pages = len(doc)
+    doc.close()
 
-# DESPUÉS (cuando Fase D esté lista):
-try:
-    from tendermod.evaluation.general_requirements_inference import get_general_requirements_v2
-    req_list = get_general_requirements_v2(k=5)
-except Exception as exc:
-    logger.warning("get_general_requirements_v2 falló (%s) — usando v1 fallback", exc)
-    req_list = get_general_requirements(k=15)
+    chapters = get_chapter_ranges_native(pdf_path)
+    if not chapters and use_llm:
+        try:
+            chapters = get_chapter_ranges_llm(pdf_path)
+        except Exception as exc:
+            logger.warning("[chapter_extractor] LLM fallback falló: %s — usando heurística", exc)
+
+    if not chapters:
+        chapters = get_chapter_ranges_heuristic(pdf_path)
+
+    return validate_chapter_ranges(chapters, n_pages)
+```
+
+### D.2 Logging granular por capítulo
+
+En `get_general_requirements` (Fase C.4), agregar al final del loop:
+
+```python
+        logger.info(
+            "[get_general_requirements] '%s': %d requerimientos (total acumulado: %d)",
+            title, len(partial.requisitos) if partial else 0, len(all_requisitos),
+        )
+```
+
+Esto permite detectar capítulos que no producen resultados (posible gap o capítulo irrelevante).
+
+### D.3 Estrategia de re-intento para capítulos sin resultados
+
+Si un capítulo relevante retorna 0 requerimientos, puede ser porque:
+- El capítulo es de tipo introductorio (no tiene requerimientos reales).
+- El rango de página está mal detectado.
+
+Agregar a `get_general_requirements` después del loop:
+
+```python
+    if len(all_requisitos) < 10:
+        logger.warning(
+            "[get_general_requirements] Solo %d requisitos extraídos — posible fallo de detección."
+            " Intentando extracción sobre capítulos no seleccionados.",
+            len(all_requisitos),
+        )
+        # Re-intentar con los capítulos descartados por filter_relevant_chapters.
+        remaining = [ch for ch in chapters if ch not in relevant_chapters]
+        for chapter in remaining[:5]:    # Límite de 5 para no disparar costo.
+            chapter_text = extract_page_range(pdf_path, chapter["start_page"], chapter["end_page"])
+            if len(chapter_text) < 500:   # Capítulo vacío o de portada.
+                continue
+            try:
+                partial = run_llm_requirements_from_chapter(chapter_text, chapter["title"])
+                for req in partial.requisitos:
+                    key = (req.seccion, req.descripcion[:60].lower())
+                    if key not in seen:
+                        seen.add(key)
+                        req.id = next_id
+                        next_id += 1
+                        all_requisitos.append(req)
+            except Exception as exc:
+                logger.warning("[get_general_requirements] Re-intento falló en '%s': %s",
+                               chapter["title"], exc)
 ```
 
 **Criterios de aceptación de Fase D:**
-- [ ] Para CCENEG-094-01-AMP-2026: ≥15 causales de rechazo extraídos (vs 0 actual).
-- [ ] Para CCENEG-094-01-AMP-2026: ≥4 ítems de categoría EVALUACION (7.x).
-- [ ] Para CCENEG-094-01-AMP-2026: total ≥80 ítems (vs 15 actual) — umbral de éxito.
-- [ ] Para FNA-VTTD-CP-002-2026: los 24 habilitantes originales siguen apareciendo (regresión).
-- [ ] El log reporta cuántos requisitos se extrajeron por pasada.
+- [ ] `validate_chapter_ranges` normaliza rangos solapados sin pérdida de cobertura.
+- [ ] El log reporta cuántos requerimientos produce cada capítulo.
+- [ ] Para FNA test9.pdf: el re-intento no se activa (≥10 requisitos en primera pasada).
+- [ ] Para AMP CCENEG-094: el re-intento no se activa (≥80 requisitos en primera pasada).
 
 ---
 
@@ -668,13 +896,13 @@ ya existe (migración 0004). Los nuevos campos `tipo` y `documento_formato` en
 Las sesiones antiguas se leen sin error porque los nuevos campos tienen default en Pydantic.
 Las sesiones nuevas incluirán `tipo` y `documento_formato` en el JSON.
 
-**Verificación:** ningún `model_validate_json` en `views.py` (líneas 185–189, 293–299) ni en
-`tasks.py` (línea 62) rompe con el schema expandido. Todos usan `GeneralRequirementList.model_validate_json`
-que tolera campos adicionales o faltantes con defaults.
+**Verificación:** ningún `model_validate_json` en `views.py` ni en `tasks.py` rompe con el
+schema expandido. Todos usan `GeneralRequirementList.model_validate_json` que tolera campos
+adicionales o faltantes con defaults.
 
 ### E.2 Actualizar `analysis_pliego_qa` para nuevas categorías
 
-**Archivo:** `web/apps/analysis/views.py` (línea 355)
+**Archivo:** `web/apps/analysis/views.py`
 
 El endpoint `analysis_pliego_qa` acepta `categoria` del body y la pasa a
 `GeneralRequirement(categoria=categoria, ...)`. Con las nuevas categorías, el frontend
@@ -713,19 +941,19 @@ Agregar al dropdown de categorías del Q&A las nuevas opciones:
 
 ### E.4 Actualizar `export_excel` — hoja Checklist General
 
-**Archivo:** `web/apps/analysis/views.py` (línea 532)
+**Archivo:** `web/apps/analysis/views.py`
 
 Agregar columnas `Tipo` y `Documento/Formato` a la hoja "Checklist General":
 
 ```python
-# ANTES (línea 533):
+# ANTES:
 cl_headers = ['#', 'Categoria', 'Descripcion', 'Obligatorio', 'Seccion', 'Pagina', 'Estado', 'Origen']
 
 # DESPUÉS:
 cl_headers = ['#', 'Categoria', 'Tipo', 'Descripcion', 'Documento/Formato',
               'Obligatorio', 'Seccion', 'Pagina', 'Estado', 'Origen']
 
-# ANTES (línea 548):
+# ANTES:
 ws_cl.append([
     req.id, req.categoria, req.descripcion,
     req.obligatorio, req.seccion, req.pagina,
@@ -748,6 +976,41 @@ ws_cl.append([
 
 ---
 
+## Impacto arquitectónico: qué cambia y qué no cambia
+
+### ChromaDB — rol reducido para extracción de requerimientos generales
+
+| Feature | Antes | Después |
+|---|---|---|
+| Extracción requerimientos generales | ChromaDB + RAG | **Extracción directa por capítulos (sin ChromaDB)** |
+| Q&A sobre el pliego (`ask_pliego`) | ChromaDB + RAG | ChromaDB + RAG (sin cambio) |
+| Extracción indicadores financieros | ChromaDB + RAG | ChromaDB + RAG (sin cambio) |
+| Extracción requisitos de experiencia | ChromaDB + RAG | ChromaDB + RAG (sin cambio) |
+| Ingesta de experiencia RUP | ChromaDB colección "rup" | ChromaDB colección "rup" (sin cambio) |
+
+ChromaDB sigue siendo necesario. Solo se elimina su uso para la extracción de requerimientos
+generales, donde el RAG era el cuello de botella de recall.
+
+### Costo LLM estimado por extracción
+
+| Escenario | Llamadas LLM | Tokens de entrada (est.) | Costo estimado (gpt-4o-mini) |
+|---|---|---|---|
+| Antes (1 llamada, contexto parcial) | 1 | ~6K tokens | ~$0.001 |
+| Después — pliego FNA típico (5 capítulos) | 5 | ~30K tokens | ~$0.006 |
+| Después — pliego AMP típico (7 capítulos) | 7 | ~50K tokens | ~$0.010 |
+| Después — pliego grande (12 capítulos) | 12 | ~90K tokens | ~$0.018 |
+
+El costo sube de $0.001 a ~$0.01–0.018 por extracción — aceptable dado que se ejecuta
+una vez por sesión. El tiempo de extracción sube de ~10s a ~30–60s (5–12 llamadas secuenciales).
+
+### Llamadas paralelas (optimización futura)
+
+Las llamadas LLM por capítulo son independientes entre sí. Para reducir el tiempo de
+extracción a ~10–15s, se pueden paralelizar con `asyncio.gather()` o `ThreadPoolExecutor`.
+Esta optimización se puede implementar post-validación funcional.
+
+---
+
 ## Plan de compatibilidad retroactiva (sesiones existentes)
 
 | Escenario | Comportamiento |
@@ -759,9 +1022,7 @@ ws_cl.append([
 | Excel export con sesión antigua | `req.tipo="NO_ESPECIFICADO"`, `req.documento_formato="N/A"` — celdas con esos valores |
 | `analysis_checklist_save` recibe `estado` para req antiguo | Sin cambio — solo actualiza campo `estado` que siempre existió |
 
-No se requiere script de migración de datos. El único riesgo es una sesión donde el JSON
-almacenado tenga `categoria` con un valor fuera de los 9 admitidos — imposible con el schema
-Pydantic actual que nunca permitió valores distintos.
+No se requiere script de migración de datos.
 
 ---
 
@@ -787,12 +1048,12 @@ Pydantic actual que nunca permitió valores distintos.
 | 24 habilitantes originales presentes | ≥22 de 24 |
 | Cero ítems nuevos falsos positivos | ≤3 falsos positivos |
 
-### Otras métricas operacionales
+### Métricas operacionales
 
 | Métrica | Límite aceptable |
 |---|---|
-| Tiempo de extracción (Celery task) | ≤90 segundos (vs ~30s actual) |
-| Incremento de costo LLM por extracción | ≤3x el costo actual |
+| Tiempo de extracción (Celery task) | ≤90 segundos |
+| Incremento de costo LLM por extracción | ≤20x el costo actual (~$0.02 máximo) |
 | `ValidationError` al parsear JSON del LLM | 0 errores en ≥95% de ejecuciones |
 
 ---
@@ -802,18 +1063,20 @@ Pydantic actual que nunca permitió valores distintos.
 | Archivo | Tipo de cambio | Fase |
 |---|---|---|
 | `src/tendermod/evaluation/schemas.py` | Expand `GeneralRequirement`: +2 campos, +3 categorías, nuevo Literal `tipo` | A |
-| `src/tendermod/evaluation/prompts.py` | Reemplazar `qna_system_message_general_requirements` + agregar `TOC_EXTRACTION_SYSTEM/USER` | B + C |
-| `src/tendermod/ingestion/toc_extractor.py` | Archivo nuevo | C |
-| `src/tendermod/evaluation/general_requirements_inference.py` | Reemplazar `HABILITANTES_QUERIES` por `FALLBACK_QUERIES`, integrar TOC en `get_general_requirements`, agregar `get_general_requirements_v2` | C + D |
-| `web/apps/analysis/tasks.py` | Línea 59: cambiar `k=15` a llamada `v2` con fallback a `v1` | D |
-| `web/apps/analysis/views.py` | Líneas 533+548: nuevas columnas en export Excel; líneas del dropdown Q&A en template | E |
+| `src/tendermod/evaluation/prompts.py` | Reemplazar `qna_system_message_general_requirements` + agregar `CHAPTER_DETECTION_SYSTEM/USER` | B + C |
+| `src/tendermod/ingestion/chapter_extractor.py` | **Archivo nuevo** — detección de capítulos + extracción de texto por rango de página | C + D |
+| `src/tendermod/evaluation/llm_client.py` | + `run_llm_chapter_detection()` + `run_llm_requirements_from_chapter()` | C |
+| `src/tendermod/evaluation/general_requirements_inference.py` | Reemplazar `get_general_requirements` con versión basada en capítulos (sin ChromaDB) | C + D |
+| `web/apps/analysis/views.py` | Nuevas columnas en export Excel; dropdown Q&A | E |
 | `web/templates/analysis/step2.html` | Badge por `tipo`, opciones nuevas en dropdown Q&A | E |
 
 **Archivos que NO se modifican:**
 - `web/apps/core/models.py` — sin cambio (campo `general_requirements_json` ya existe como `TextField`)
 - `web/apps/core/migrations/` — sin nueva migración
 - `web/apps/analysis/urls.py` — sin nuevas rutas
-- `src/tendermod/evaluation/llm_client.py` — la función `run_llm_general_requirements` se reutiliza tal cual; solo se agrega `run_llm_raw_json` si se implementa el TOC LLM fallback
+- `web/apps/analysis/tasks.py` — la llamada a `get_general_requirements(k=15)` sigue siendo válida; el parámetro `k` se ignora en la nueva implementación (no hay retriever)
+- `src/tendermod/retrieval/vectorstore.py` — sin cambio
+- `src/tendermod/retrieval/retriever.py` — sin cambio
 
 ---
 
@@ -822,22 +1085,21 @@ Pydantic actual que nunca permitió valores distintos.
 **PR 1 (Bloqueante, ~3h):** Fase A + Fase B
 - Expandir schema (`schemas.py`)
 - Reemplazar system prompt (`prompts.py`)
-- Verificar que `extract_general_requirements_task` no lanza `ValidationError` en ambos pliegos
+- Verificar que el LLM retorna JSON válido con los nuevos tipos
 
-**PR 2 (~4h):** Fase E (Django UI)
+**PR 2 (~1 día):** Fase C (extracción por capítulos)
+- Nuevo `chapter_extractor.py`
+- Nuevas funciones en `llm_client.py`
+- Nuevos prompts `CHAPTER_DETECTION_SYSTEM/USER`
+- Reemplazar `get_general_requirements` en `general_requirements_inference.py`
+- Prueba con FNA test9.pdf: verificar que LLM fallback detecta capítulos
+- Prueba con CCENEG-094-01-AMP-2026: verificar ≥80 ítems
+
+**PR 3 (~4h):** Fase D (robustez) + Fase E (Django UI)
+- `validate_chapter_ranges` y logging granular
 - Badge por tipo en `step2.html`
 - Nuevas categorías en dropdown Q&A
 - Nuevas columnas en export Excel
-- Prueba manual con una sesión antigua: no debe romper
-
-**PR 3 (~1 día):** Fase C (TOC Discovery)
-- Nuevo `toc_extractor.py`
-- Integrar en `get_general_requirements`
-- Probar con CCENEG-094-01-AMP-2026: verificar que el TOC nativo resuelve el gap de secciones
-
-**PR 4 (~1 día):** Fase D (extracción multi-pasada)
-- `get_general_requirements_v2`
-- Activar en `tasks.py` con fallback a v1
 - Prueba de regresión con FNA-VTTD-CP-002-2026
 
 ---
@@ -864,3 +1126,12 @@ El mapping de columnas al schema Pydantic expandido es:
 | Cumple | `estado` |
 | Documento/Formato Exigido | `documento_formato` |
 | Observaciones | — (no modelado, candidato a campo futuro) |
+
+## Anexo — Comportamiento esperado de detección por tipo de pliego
+
+| Tipo de PDF | `get_toc()` | Estrategia activa | Tiempo detección |
+|---|---|---|---|
+| AMP Colombia Compra Eficiente (bien estructurado) | ≥20 entradas | TOC nativo | <1s |
+| FNA test9.pdf (sin outline nativo) | 0 entradas | LLM sobre primeras 10 páginas | ~3s |
+| PDF escaneado sin texto embebido | 0 entradas | LLM → posiblemente falla → heurística | ~3s + fallback |
+| PDF con índice en páginas 2–4 | 0 entradas (sin outline) | LLM sobre primeras 10 páginas | ~3s |
