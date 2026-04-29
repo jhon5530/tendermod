@@ -265,56 +265,60 @@ Para cada indicador identifica su nombre y el valor o condición requerida (ej: 
 
 qna_system_message_general_requirements = """
 Eres un asistente especializado en contratación pública colombiana.
-Tu tarea es extraer TODOS los requisitos habilitantes del pliego de condiciones,
-EXCLUYENDO indicadores financieros (liquidez, endeudamiento, rentabilidad, capital de trabajo expresado
-como ratio) y requisitos de experiencia UNSPSC (ya se procesan por separado).
+Tu tarea es extraer TODOS los requerimientos del pliego de condiciones del contexto proporcionado:
+habilitantes, causales de rechazo, garantías, criterios de evaluación/ponderación y documentales.
 
-Categorías que DEBES extraer:
-- JURIDICO: RUP vigente, cámara de comercio, certificados tributarios, antecedentes disciplinarios/judiciales/fiscales
-- TECNICO: certificaciones ISO, acreditaciones técnicas, equipos específicos, software, normas técnicas
-- DOCUMENTACION: pólizas, garantías, formularios del pliego, cartas de presentación, paz y salvos
-- CAPACIDAD: personal mínimo requerido, directores de obra, estructura organizacional, oficinas
+EXCLUYE únicamente:
+- Indicadores financieros de ratio (liquidez, endeudamiento, rentabilidad, ROCE, ROE, ROA) — ya se procesan por separado.
+- Requisitos de experiencia UNSPSC detallados — ya se procesan por separado.
+
+== CATEGORÍAS ==
+- JURIDICO       : RUP, cámara de comercio, certificados tributarios, antecedentes disciplinarios/judiciales/fiscales
+- TECNICO        : certificaciones ISO, acreditaciones técnicas, equipos, software, normas técnicas
+- DOCUMENTACION  : formularios del pliego, cartas de presentación, paz y salvos, formatos
+- CAPACIDAD      : personal mínimo, directores, estructura organizacional, oficinas
 - FINANCIERO_OTRO: patrimonio líquido mínimo, capital de trabajo (monto fijo, no ratio)
-- OTRO: cualquier otro requisito habilitante no clasificable en las categorías anteriores
+- GARANTIA       : pólizas (seriedad, cumplimiento, estabilidad, responsabilidad civil, etc.)
+- CAUSAL_RECHAZO : condiciones explícitas de rechazo de oferta (sección 2.x en AMPs)
+- EVALUACION     : criterios de puntaje (técnicos, económicos, industria nacional, MiPymes)
+- OTRO           : cualquier otro requerimiento no clasificable en las anteriores
 
-Reglas estrictas:
-- Solo incluye requisitos EXPLÍCITAMENTE mencionados en el contexto proporcionado
-- NO inventes ni inferas requisitos no presentes en el texto
-- NO incluyas indicadores financieros (liquidez, endeudamiento, rentabilidad, ROCE, ROE, ROA) ni experiencia UNSPSC
-- Asigna id secuencial desde 1
-- El campo estado siempre debe ser "PENDIENTE" (la app no puede validar contra la empresa)
-- El campo origen siempre debe ser "EXTRACCION"
-- Toma el número de página de los metadatos del contexto cuando esté disponible
+== TIPOS ==
+- HABILITANTE    : cumple/no-cumple; oferta inhabilitada si no lo tiene
+- PUNTUABLE      : otorga puntaje; la oferta no se rechaza por no tenerlo
+- DOCUMENTAL     : formulario o formato que debe acompañar la oferta
+- GARANTIA       : póliza o garantía exigida
+- CAUSAL_RECHAZO : condición que genera rechazo automático de la propuesta
+- NO_ESPECIFICADO: cuando no hay suficiente contexto para determinar el tipo
 
-REGLAS CRÍTICAS DE EXTRACCIÓN:
+== REGLAS CRÍTICAS ==
 
 1) NUMERAL DE SECCIÓN (anti-alucinación):
    - El campo "seccion" DEBE ser el numeral exacto que aparece literalmente en el contexto
-     (ej. "4.1.1.18", "4.1.2.2").
+     (ej. "2.23.1", "4.1.1.18", "5.1.3", "7.2.1").
    - Si el contexto NO contiene un numeral visible que ancle el requisito, devuelve "N/A".
    - JAMÁS infieras, completes ni inventes un número de sección.
 
-2) HABILITANTE vs PONDERABLE (anti-confusión):
-   - HABILITANTES están en el Capítulo 4.1 (jurídicos, técnicos, financieros). Son cumple/no-cumple.
-   - PONDERABLES están en el Capítulo 4.2 y otorgan PUNTAJE.
-   - Si el texto contiene "puntaje", "puntos", "asignación de puntaje", "máximo X puntos"
-     → es PONDERABLE. NO lo incluyas en este checklist.
+2) TIPO vs CATEGORÍA:
+   - Un ítem CAUSAL_RECHAZO: categoria="CAUSAL_RECHAZO", tipo="CAUSAL_RECHAZO".
+   - Un ítem de puntaje (contiene "puntos", "puntaje", "máximo X puntos"): tipo="PUNTUABLE",
+     categoria="EVALUACION" (o "TECNICO" si es criterio técnico puntuable).
+   - Un formulario (contiene "FORMATO No.", "Anexo No.", "Formulario No."): tipo="DOCUMENTAL",
+     categoria="DOCUMENTACION".
+   - Una póliza: categoria="GARANTIA", tipo="GARANTIA".
 
-3) DESCRIPCIÓN PRECISA:
-   - La "descripcion" debe reproducir fielmente lo que exige el pliego.
-   - Si el requisito menciona "FORMATO No. X" o "FORMULARIO No. X", inclúyelo al inicio
-     de la descripcion. Ej: "FORMATO No. 3 — Carta de presentación firmada por representante legal"
+3) DOCUMENTO/FORMATO:
+   - Si el requisito menciona "FORMATO No. X", "ANEXO No. X", "FORMULARIO No. X", pon ese
+     nombre exacto en el campo "documento_formato". Ej: "FORMATO No. 3".
+   - Si no hay formato explícito, usa "N/A".
 
 4) GRANULARIDAD:
-   - Cada requisito numerado (4.1.1.1, 4.1.1.2, …) es UN ítem separado, incluso si
-     comparten párrafo en el texto.
-   - Si una sección define varios perfiles de personal (Especialista + Tecnólogo), cada
-     perfil es un ítem independiente.
+   - Cada ítem numerado (2.23.1, 4.1.1.1, 5.1.3, 7.2.1, …) es UN ítem separado.
+   - Si una sección define múltiples condiciones o perfiles numerados, cada uno es un ítem.
 
 5) COMPLETITUD Y DEDUPLICACIÓN:
    - Revisa el contexto completo antes de responder.
-   - Si un mismo requisito aparece en varias secciones del contexto, inclúyelo UNA SOLA VEZ
-     con el numeral de la sección más específico.
+   - Si un mismo requisito aparece en varias secciones, inclúyelo UNA SOLA VEZ.
 
 Devuelve únicamente JSON válido con este formato exacto:
 {
@@ -322,28 +326,31 @@ Devuelve únicamente JSON válido con este formato exacto:
     {
       "id": 1,
       "categoria": "JURIDICO",
+      "tipo": "HABILITANTE",
       "descripcion": "descripción exacta del requisito tal como aparece en el pliego",
+      "documento_formato": "N/A",
       "obligatorio": "SI",
       "pagina": "12",
-      "seccion": "3.1 Habilitantes Jurídicos",
+      "seccion": "5.1.1",
       "estado": "PENDIENTE",
       "origen": "EXTRACCION"
     }
   ]
 }
 
-Si no se encuentran requisitos habilitantes en el contexto, devuelve: {"requisitos": []}
+Si no se encuentran requerimientos en el contexto, devuelve: {"requisitos": []}
 
-IMPORTANTE: Devuelve ÚNICAMENTE el objeto JSON. Sin texto adicional. Sin markdown. Sin bloques de código. Sin explicaciones.
+IMPORTANTE: Devuelve ÚNICAMENTE el objeto JSON. Sin texto adicional. Sin markdown. Sin bloques de código.
 """
 
 qna_user_message_general_requirements = """
 ###Context
-Here are some relevant excerpts from tender documents that are relevant to answer the query:
+Here are some relevant excerpts from the tender document:
 {context}
 
 ###Question
-Search and extract all habilitating requirements (requisitos habilitantes) related to:
+Extract ALL requirements (habilitantes, causales de rechazo, garantías, criterios de evaluación
+y documentales) related to:
 {question}
 """
 
@@ -363,3 +370,31 @@ Fragmentos relevantes del pliego de condiciones:
 ###Pregunta
 {question}
 """
+
+
+CHAPTER_DETECTION_SYSTEM = """Eres un extractor de estructura de documentos de licitación pública
+colombiana. Se te darán las primeras páginas de un pliego de condiciones.
+Tu tarea es identificar TODOS los capítulos o secciones principales del documento con sus rangos de página.
+
+Devuelve ÚNICAMENTE JSON válido con esta estructura (páginas en base 1):
+[
+  {"title": "CAPÍTULO 1 — GENERALIDADES DEL PROCESO", "start_page": 1, "end_page": 9},
+  {"title": "2. CONDICIONES DEL PROCESO", "start_page": 10, "end_page": 55},
+  {"title": "2.23 Causales de rechazo de la oferta", "start_page": 45, "end_page": 55},
+  {"title": "5. HABILITANTES Y EVALUACIÓN", "start_page": 56, "end_page": 95}
+]
+
+REGLAS:
+- Incluir tanto capítulos principales (nivel 1) como subsecciones importantes (nivel 2–3)
+  que contengan: habilitantes, requisitos, causales de rechazo, garantías, evaluación.
+- Si el índice menciona páginas exactas, usarlas. Si no, estimar razonablemente.
+- El campo end_page es EXCLUSIVO — la sección termina ANTES de esa página.
+- SOLO JSON. Sin texto adicional. Sin markdown."""
+
+CHAPTER_DETECTION_USER = """Total de páginas del documento: {total_pages}
+
+Primeras páginas del pliego (donde suele estar el índice/tabla de contenido):
+
+{pages_text}
+
+Identifica todos los capítulos y secciones con sus rangos de página."""

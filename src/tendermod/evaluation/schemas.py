@@ -109,8 +109,27 @@ class ExperienceResponse(BaseModel):
 
 class GeneralRequirement(BaseModel):
     id: int
-    categoria: Literal["JURIDICO", "TECNICO", "DOCUMENTACION", "CAPACIDAD", "FINANCIERO_OTRO", "OTRO"]
+    categoria: Literal[
+        "JURIDICO",
+        "TECNICO",
+        "DOCUMENTACION",
+        "CAPACIDAD",
+        "FINANCIERO_OTRO",
+        "GARANTIA",
+        "CAUSAL_RECHAZO",
+        "EVALUACION",
+        "OTRO",
+    ]
+    tipo: Literal[
+        "HABILITANTE",
+        "PUNTUABLE",
+        "DOCUMENTAL",
+        "GARANTIA",
+        "CAUSAL_RECHAZO",
+        "NO_ESPECIFICADO",
+    ] = "NO_ESPECIFICADO"
     descripcion: str
+    documento_formato: str = "N/A"
     obligatorio: Literal["SI", "NO", "NO_ESPECIFICADO"] = "SI"
     pagina: str = "N/A"
     seccion: str = "N/A"

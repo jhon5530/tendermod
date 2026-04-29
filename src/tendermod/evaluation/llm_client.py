@@ -1,7 +1,13 @@
+import json
+import logging
+import re
+
 from openai import OpenAI
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
+
+logger = logging.getLogger(__name__)
 
 from tendermod.evaluation.prompts import basic_comparation_system_prompt, basic_comparation_user_prompt
 from tendermod.evaluation.schemas import ExperienceResponse, MultipleIndicatorResponse, GeneralRequirementList
@@ -90,6 +96,58 @@ def run_llm_general_requirements(context: str, query: str) -> GeneralRequirement
         HumanMessage(content=user_content),
     ]
     return structured_llm.invoke(messages)
+
+
+def run_llm_requirements_from_chapter(chapter_text: str, chapter_title: str) -> GeneralRequirementList:
+    """Extrae requerimientos del texto completo de un capítulo del pliego."""
+    from tendermod.evaluation.prompts import (
+        qna_system_message_general_requirements,
+        qna_user_message_general_requirements,
+    )
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    structured_llm = llm.with_structured_output(GeneralRequirementList)
+    user_content = (
+        qna_user_message_general_requirements
+        .replace("{context}", chapter_text)
+        .replace("{question}", f"requerimientos en el capítulo: {chapter_title}")
+    )
+    messages = [
+        SystemMessage(content=qna_system_message_general_requirements),
+        HumanMessage(content=user_content),
+    ]
+    return structured_llm.invoke(messages)
+
+
+def run_llm_chapter_detection(pages_text: str, total_pages: int) -> list[dict]:
+    """
+    Detecta capítulos y sus rangos de página desde las primeras páginas del PDF.
+    Retorna lista de dicts con title, start_page, end_page (1-based).
+    """
+    from tendermod.evaluation.prompts import CHAPTER_DETECTION_SYSTEM, CHAPTER_DETECTION_USER
+
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    user_content = (
+        CHAPTER_DETECTION_USER
+        .replace("{pages_text}", pages_text)
+        .replace("{total_pages}", str(total_pages))
+    )
+    messages = [
+        SystemMessage(content=CHAPTER_DETECTION_SYSTEM),
+        HumanMessage(content=user_content),
+    ]
+    response = llm.invoke(messages)
+    raw = response.content.strip()
+
+    # Limpiar markdown fence si el LLM lo incluye
+    if raw.startswith("```"):
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw.strip())
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.error("[run_llm_chapter_detection] JSON inválido: %s — raw: %s", exc, raw[:300])
+        return []
 
 
 

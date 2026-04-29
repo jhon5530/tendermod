@@ -530,7 +530,10 @@ def export_excel(request, pk):
             if gr.requisitos:
                 ws_cl = wb.create_sheet('Checklist General')
 
-                cl_headers = ['#', 'Categoria', 'Descripcion', 'Obligatorio', 'Seccion', 'Pagina', 'Estado', 'Origen']
+                cl_headers = [
+                    '#', 'Categoria', 'Tipo', 'Descripcion', 'Documento/Formato',
+                    'Obligatorio', 'Seccion', 'Pagina', 'Estado', 'Origen',
+                ]
                 for col_num, header in enumerate(cl_headers, 1):
                     cell = ws_cl.cell(row=1, column=col_num, value=header)
                     cell.font = header_font
@@ -547,13 +550,13 @@ def export_excel(request, pk):
                 for req in gr.requisitos:
                     row_num = ws_cl.max_row + 1
                     ws_cl.append([
-                        req.id, req.categoria, req.descripcion,
-                        req.obligatorio, req.seccion, req.pagina,
-                        req.estado, req.origen,
+                        req.id, req.categoria, req.tipo, req.descripcion,
+                        req.documento_formato, req.obligatorio, req.seccion,
+                        req.pagina, req.estado, req.origen,
                     ])
                     fill = estado_fills.get(req.estado)
                     if fill:
-                        for col in range(1, 9):
+                        for col in range(1, 11):
                             ws_cl.cell(row=row_num, column=col).fill = fill
 
                 for col in ws_cl.columns:

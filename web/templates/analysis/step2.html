@@ -266,10 +266,19 @@
                                 <div class="small text-muted">
                                     {{ req.seccion }}
                                     {% if req.pagina != "N/A" %}&nbsp;&bull;&nbsp;Pag. {{ req.pagina }}{% endif %}
+                                    {% if req.tipo == "CAUSAL_RECHAZO" %}<span class="badge bg-danger ms-1">Causal Rechazo</span>
+                                    {% elif req.tipo == "PUNTUABLE" %}<span class="badge bg-info text-dark ms-1">Puntuable</span>
+                                    {% elif req.tipo == "GARANTIA" %}<span class="badge bg-warning text-dark ms-1">Garantia</span>
+                                    {% elif req.tipo == "HABILITANTE" %}<span class="badge bg-success ms-1">Habilitante</span>
+                                    {% elif req.tipo == "DOCUMENTAL" %}<span class="badge bg-secondary ms-1">Documental</span>
+                                    {% endif %}
                                     {% if req.origen == "QA" %}<span class="badge bg-info ms-1">Q&A</span>{% endif %}
                                     {% if req.origen == "MANUAL" %}<span class="badge bg-warning text-dark ms-1">Manual</span>{% endif %}
                                 </div>
                                 <div>{{ req.descripcion }}</div>
+                                {% if req.documento_formato != "N/A" %}
+                                <div class="small text-primary mt-1"><i class="bi bi-file-earmark me-1"></i>{{ req.documento_formato }}</div>
+                                {% endif %}
                             </div>
                             <select class="form-select form-select-sm estado-select flex-shrink-0"
                                     style="width:140px"
@@ -307,10 +316,14 @@
                         <div class="col-md-3">
                             <select id="qa-categoria" class="form-select">
                                 <option value="OTRO">Otro</option>
-                                <option value="TECNICO">Tecnico</option>
                                 <option value="JURIDICO">Juridico</option>
+                                <option value="TECNICO">Tecnico</option>
                                 <option value="DOCUMENTACION">Documentacion</option>
                                 <option value="CAPACIDAD">Capacidad</option>
+                                <option value="FINANCIERO_OTRO">Financiero</option>
+                                <option value="GARANTIA">Garantia</option>
+                                <option value="CAUSAL_RECHAZO">Causal Rechazo</option>
+                                <option value="EVALUACION">Evaluacion</option>
                             </select>
                         </div>
                         <div class="col-md-3">
