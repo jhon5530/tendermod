@@ -147,6 +147,31 @@
                 </div>
                 <div id="spinner-general-info" class="ms-3 mb-3"></div>
 
+                <!-- General requirements extraction -->
+                <div class="d-flex align-items-start gap-3 mb-3 p-3 bg-light rounded">
+                    <div class="flex-grow-1">
+                        <strong>Requisitos Generales Habilitantes</strong>
+                        <p class="text-muted small mb-0">
+                            Documentos, certificaciones, garantias, polizas, personal minimo y otros habilitantes.
+                        </p>
+                    </div>
+                    <div>
+                        {% if has_general_requirements %}
+                            <span class="badge bg-success me-2">
+                                <i class="bi bi-check me-1"></i>Extraido
+                            </span>
+                        {% endif %}
+                        <button class="btn btn-outline-primary btn-sm"
+                                id="btn-extract-general-req"
+                                onclick="doExtractGeneralRequirements()"
+                                {% if session.status == 'ingesting_pdf' or session.status == 'created' %}disabled{% endif %}>
+                            <i class="bi bi-list-check me-1"></i>
+                            {% if has_general_requirements %}Re-extraer{% else %}Extraer requisitos{% endif %}
+                        </button>
+                    </div>
+                </div>
+                <div id="spinner-general-req" class="ms-3 mb-3"></div>
+
             </div>
         </div>
 
@@ -180,9 +205,14 @@
                         <strong>Indicadores:</strong> Extrae los indicadores financieros habilitantes
                         (liquidez, endeudamiento, rentabilidad) con sus umbrales.
                     </li>
-                    <li>
+                    <li class="mb-2">
                         <strong>Info general:</strong> Recupera el presupuesto oficial y datos
                         contextuales del proceso. Opcional pero recomendado.
+                    </li>
+                    <li>
+                        <strong>Requisitos generales:</strong> Extrae todos los habilitantes
+                        distintos de experiencia e indicadores: documentos juridicos, certificaciones,
+                        polizas, personal minimo, etc. El usuario marca el cumplimiento en el Paso 2.
                     </li>
                 </ul>
             </div>
@@ -210,6 +240,7 @@ if ('{{ session.celery_task_id }}') {
             document.getElementById('btn-extract-experience').disabled = false;
             document.getElementById('btn-extract-indicators').disabled = false;
             document.getElementById('btn-extract-info').disabled = false;
+            document.getElementById('btn-extract-general-req').disabled = false;
             pdfReady = true;
         },
         function(err) {
@@ -256,6 +287,19 @@ function doExtractGeneralInfo() {
         function(result) {
             document.getElementById('btn-extract-info').innerHTML =
                 '<i class="bi bi-info-circle me-1"></i>Re-extraer';
+        }
+    );
+}
+
+function doExtractGeneralRequirements() {
+    launchExtraction(
+        SESSION_ID,
+        'general_requirements',
+        'spinner-general-req',
+        'Requisitos generales extraidos correctamente.',
+        function(result) {
+            document.getElementById('btn-extract-general-req').innerHTML =
+                '<i class="bi bi-list-check me-1"></i>Re-extraer';
         }
     );
 }

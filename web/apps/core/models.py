@@ -20,6 +20,8 @@ class AnalysisSession(models.Model):
     indicators_requirements_json = models.TextField(blank=True)
     # General info string from get_general_info()
     general_info_text = models.TextField(blank=True)
+    # GeneralRequirementList.model_dump_json()
+    general_requirements_json = models.TextField(blank=True, default='')
     celery_task_id = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

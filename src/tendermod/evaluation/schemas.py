@@ -107,6 +107,21 @@ class ExperienceResponse(BaseModel):
     )
 
 
+class GeneralRequirement(BaseModel):
+    id: int
+    categoria: Literal["JURIDICO", "TECNICO", "DOCUMENTACION", "CAPACIDAD", "FINANCIERO_OTRO", "OTRO"]
+    descripcion: str
+    obligatorio: Literal["SI", "NO", "NO_ESPECIFICADO"] = "SI"
+    pagina: str = "N/A"
+    seccion: str = "N/A"
+    estado: Literal["PENDIENTE", "CUMPLE", "NO_CUMPLE", "N/A"] = "PENDIENTE"
+    origen: Literal["EXTRACCION", "QA", "MANUAL"] = "EXTRACCION"
+
+
+class GeneralRequirementList(BaseModel):
+    requisitos: List[GeneralRequirement] = []
+
+
 class IndicatorComplianceResult(BaseModel):
     cumple: Optional[bool] = Field(default=None, description="True si cumple, False si no, None si no se pudo determinar")
     detalle: str = Field(default="", description="Texto completo del LLM con la argumentación")

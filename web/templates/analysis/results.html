@@ -388,6 +388,58 @@
 
 {% endif %}{# end if result #}
 
+<!-- Checklist de Requisitos Generales -->
+{% if general_requirements %}
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header card-header-tendermod d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-list-check me-2"></i>Checklist de Requisitos Generales</h5>
+        <div class="d-flex gap-2">
+            {% with cumple_count=general_requirements|length %}
+            <span class="badge bg-secondary">{{ cumple_count }} requisito{{ cumple_count|pluralize:"s" }}</span>
+            {% endwith %}
+            <a href="{% url 'analysis:step2' pk=session.pk %}#form-c" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-pencil me-1"></i>Editar estados
+            </a>
+        </div>
+    </div>
+    <div class="card-body">
+        {% regroup general_requirements by categoria as req_by_cat %}
+        {% for cat_group in req_by_cat %}
+            <h6 class="text-muted small text-uppercase mt-3 mb-2">
+                <i class="bi bi-tag me-1"></i>{{ cat_group.grouper }}
+            </h6>
+            {% for req in cat_group.list %}
+            <div class="d-flex align-items-start gap-2 mb-2">
+                {% if req.estado == "CUMPLE" %}
+                    <span class="badge bg-success flex-shrink-0">CUMPLE</span>
+                {% elif req.estado == "NO_CUMPLE" %}
+                    <span class="badge bg-danger flex-shrink-0">NO CUMPLE</span>
+                {% elif req.estado == "N/A" %}
+                    <span class="badge bg-secondary flex-shrink-0">N/A</span>
+                {% else %}
+                    <span class="badge bg-warning text-dark flex-shrink-0">PENDIENTE</span>
+                {% endif %}
+                <span class="small">
+                    {{ req.descripcion }}
+                    {% if req.pagina != "N/A" %}
+                        <span class="text-muted ms-1">&bull; Pag. {{ req.pagina }}</span>
+                    {% endif %}
+                    {% if req.origen == "QA" %}<span class="badge bg-info ms-1" style="font-size:0.65rem">Q&A</span>{% endif %}
+                </span>
+            </div>
+            {% endfor %}
+        {% endfor %}
+        {% if general_requirements %}
+        <div class="alert alert-light border mt-3 mb-0 small">
+            <i class="bi bi-info-circle me-1"></i>
+            Los estados <strong>PENDIENTE</strong> requieren validacion manual.
+            Editalos en el Paso 2 o descarga el Excel para completarlos offline.
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
 <!-- Bottom navigation -->
 <div class="d-flex justify-content-between align-items-center mt-2">
     <a href="{% url 'analysis:step2' pk=session.pk %}" class="btn btn-outline-secondary">

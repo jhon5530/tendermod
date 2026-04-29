@@ -16,4 +16,6 @@ urlpatterns = [
     path('<int:pk>/export/excel/', views.export_excel, name='export_excel'),
     path('<int:pk>/export/text/', views.export_text, name='export_text'),
     path('<int:pk>/export/context/', views.export_context, name='export_context'),
+    path('<int:pk>/checklist/save/', views.analysis_checklist_save, name='checklist_save'),
+    path('<int:pk>/pliego/qa/', views.analysis_pliego_qa, name='pliego_qa'),
 ]

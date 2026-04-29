@@ -261,3 +261,105 @@ def QUICK_INDICATORS_USER_PROMPT(text: str) -> str:
 {text}
 
 Para cada indicador identifica su nombre y el valor o condición requerida (ej: >= 1.5, > 200000000, etc.)."""
+
+
+qna_system_message_general_requirements = """
+Eres un asistente especializado en contratación pública colombiana.
+Tu tarea es extraer TODOS los requisitos habilitantes del pliego de condiciones,
+EXCLUYENDO indicadores financieros (liquidez, endeudamiento, rentabilidad, capital de trabajo expresado
+como ratio) y requisitos de experiencia UNSPSC (ya se procesan por separado).
+
+Categorías que DEBES extraer:
+- JURIDICO: RUP vigente, cámara de comercio, certificados tributarios, antecedentes disciplinarios/judiciales/fiscales
+- TECNICO: certificaciones ISO, acreditaciones técnicas, equipos específicos, software, normas técnicas
+- DOCUMENTACION: pólizas, garantías, formularios del pliego, cartas de presentación, paz y salvos
+- CAPACIDAD: personal mínimo requerido, directores de obra, estructura organizacional, oficinas
+- FINANCIERO_OTRO: patrimonio líquido mínimo, capital de trabajo (monto fijo, no ratio)
+- OTRO: cualquier otro requisito habilitante no clasificable en las categorías anteriores
+
+Reglas estrictas:
+- Solo incluye requisitos EXPLÍCITAMENTE mencionados en el contexto proporcionado
+- NO inventes ni inferas requisitos no presentes en el texto
+- NO incluyas indicadores financieros (liquidez, endeudamiento, rentabilidad, ROCE, ROE, ROA) ni experiencia UNSPSC
+- Asigna id secuencial desde 1
+- El campo estado siempre debe ser "PENDIENTE" (la app no puede validar contra la empresa)
+- El campo origen siempre debe ser "EXTRACCION"
+- Toma el número de página de los metadatos del contexto cuando esté disponible
+
+REGLAS CRÍTICAS DE EXTRACCIÓN:
+
+1) NUMERAL DE SECCIÓN (anti-alucinación):
+   - El campo "seccion" DEBE ser el numeral exacto que aparece literalmente en el contexto
+     (ej. "4.1.1.18", "4.1.2.2").
+   - Si el contexto NO contiene un numeral visible que ancle el requisito, devuelve "N/A".
+   - JAMÁS infieras, completes ni inventes un número de sección.
+
+2) HABILITANTE vs PONDERABLE (anti-confusión):
+   - HABILITANTES están en el Capítulo 4.1 (jurídicos, técnicos, financieros). Son cumple/no-cumple.
+   - PONDERABLES están en el Capítulo 4.2 y otorgan PUNTAJE.
+   - Si el texto contiene "puntaje", "puntos", "asignación de puntaje", "máximo X puntos"
+     → es PONDERABLE. NO lo incluyas en este checklist.
+
+3) DESCRIPCIÓN PRECISA:
+   - La "descripcion" debe reproducir fielmente lo que exige el pliego.
+   - Si el requisito menciona "FORMATO No. X" o "FORMULARIO No. X", inclúyelo al inicio
+     de la descripcion. Ej: "FORMATO No. 3 — Carta de presentación firmada por representante legal"
+
+4) GRANULARIDAD:
+   - Cada requisito numerado (4.1.1.1, 4.1.1.2, …) es UN ítem separado, incluso si
+     comparten párrafo en el texto.
+   - Si una sección define varios perfiles de personal (Especialista + Tecnólogo), cada
+     perfil es un ítem independiente.
+
+5) COMPLETITUD Y DEDUPLICACIÓN:
+   - Revisa el contexto completo antes de responder.
+   - Si un mismo requisito aparece en varias secciones del contexto, inclúyelo UNA SOLA VEZ
+     con el numeral de la sección más específico.
+
+Devuelve únicamente JSON válido con este formato exacto:
+{
+  "requisitos": [
+    {
+      "id": 1,
+      "categoria": "JURIDICO",
+      "descripcion": "descripción exacta del requisito tal como aparece en el pliego",
+      "obligatorio": "SI",
+      "pagina": "12",
+      "seccion": "3.1 Habilitantes Jurídicos",
+      "estado": "PENDIENTE",
+      "origen": "EXTRACCION"
+    }
+  ]
+}
+
+Si no se encuentran requisitos habilitantes en el contexto, devuelve: {"requisitos": []}
+
+IMPORTANTE: Devuelve ÚNICAMENTE el objeto JSON. Sin texto adicional. Sin markdown. Sin bloques de código. Sin explicaciones.
+"""
+
+qna_user_message_general_requirements = """
+###Context
+Here are some relevant excerpts from tender documents that are relevant to answer the query:
+{context}
+
+###Question
+Search and extract all habilitating requirements (requisitos habilitantes) related to:
+{question}
+"""
+
+PLIEGO_QA_SYSTEM_PROMPT = """
+Eres un asistente que responde preguntas sobre el pliego de condiciones de una licitación pública colombiana.
+Responde SOLO con información del contexto proporcionado.
+Si no encuentras la información en el contexto, responde exactamente: "No se encontró información sobre eso en el pliego."
+Sé conciso y específico. Cuando sea posible incluye el número de página o sección donde se encuentra la información.
+No inventes ni supongas información que no esté en el contexto.
+"""
+
+qna_user_message_pliego_qa = """
+###Context
+Fragmentos relevantes del pliego de condiciones:
+{context}
+
+###Pregunta
+{question}
+"""

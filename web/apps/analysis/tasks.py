@@ -40,6 +40,35 @@ def ingest_pdf_task(self, session_id):
         raise
 
 
+@shared_task(bind=True, name='analysis.extract_general_requirements_task')
+def extract_general_requirements_task(self, session_id):
+    """
+    Extrae requisitos habilitantes generales del pliego usando RAG.
+    Guarda GeneralRequirementList en session.general_requirements_json.
+    """
+    connection.close()
+    from apps.core.models import AnalysisSession
+    try:
+        from tendermod.evaluation.general_requirements_inference import get_general_requirements
+
+        session = AnalysisSession.objects.get(pk=session_id)
+        session.celery_task_id = self.request.id
+        session.save(update_fields=['celery_task_id', 'updated_at'])
+
+        logger.info('Extrayendo requisitos generales para sesion %s', session_id)
+        req_list = get_general_requirements(k=15)
+        connection.close()
+
+        session.general_requirements_json = req_list.model_dump_json()
+        session.save(update_fields=['general_requirements_json', 'updated_at'])
+        logger.info('Requisitos generales extraidos para sesion %s (%d items)', session_id, len(req_list.requisitos))
+        return {'status': 'ok', 'session_id': session_id, 'count': len(req_list.requisitos)}
+
+    except Exception as exc:
+        logger.error('Error extrayendo requisitos generales para sesion %s: %s', session_id, exc)
+        raise
+
+
 @shared_task(bind=True, name='analysis.extract_experience_task')
 def extract_experience_task(self, session_id):
     """

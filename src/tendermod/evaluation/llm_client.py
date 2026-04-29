@@ -4,7 +4,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from tendermod.evaluation.prompts import basic_comparation_system_prompt, basic_comparation_user_prompt
-from tendermod.evaluation.schemas import ExperienceResponse, MultipleIndicatorResponse
+from tendermod.evaluation.schemas import ExperienceResponse, MultipleIndicatorResponse, GeneralRequirementList
 
 load_dotenv()
 def run_llm_indices(system_message, user_message, max_tokens=2500, temperature=0.3, top_p=0.95):
@@ -69,6 +69,25 @@ def run_llm_quick_indicators(text: str) -> MultipleIndicatorResponse:
     messages = [
         SystemMessage(content=QUICK_INDICATORS_SYSTEM_PROMPT),
         HumanMessage(content=QUICK_INDICATORS_USER_PROMPT(text))
+    ]
+    return structured_llm.invoke(messages)
+
+
+def run_llm_general_requirements(context: str, query: str) -> GeneralRequirementList:
+    from tendermod.evaluation.prompts import (
+        qna_system_message_general_requirements,
+        qna_user_message_general_requirements,
+    )
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    structured_llm = llm.with_structured_output(GeneralRequirementList)
+    user_content = (
+        qna_user_message_general_requirements
+        .replace("{context}", context)
+        .replace("{question}", query)
+    )
+    messages = [
+        SystemMessage(content=qna_system_message_general_requirements),
+        HumanMessage(content=user_content),
     ]
     return structured_llm.invoke(messages)
 

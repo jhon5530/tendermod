@@ -17,6 +17,7 @@ from .tasks import (
     extract_experience_task,
     extract_indicators_task,
     extract_general_info_task,
+    extract_general_requirements_task,
     evaluate_experience_task,
     evaluate_indicators_task,
     quick_evaluate_experience_task,
@@ -95,6 +96,7 @@ def analysis_step1(request, pk):
         'has_experience': bool(session.experience_requirements_json),
         'has_indicators': bool(session.indicators_requirements_json),
         'has_general_info': bool(session.general_info_text),
+        'has_general_requirements': bool(session.general_requirements_json),
     }
     return render(request, 'analysis/step1.html', context)
 
@@ -120,6 +122,8 @@ def analysis_extract(request, pk):
         task = extract_indicators_task.delay(session.pk)
     elif action == 'general_info':
         task = extract_general_info_task.delay(session.pk)
+    elif action == 'general_requirements':
+        task = extract_general_requirements_task.delay(session.pk)
     else:
         return JsonResponse({'error': f'Accion desconocida: {action}'}, status=400)
 
@@ -175,6 +179,15 @@ def analysis_step2(request, pk):
         # AJAX evaluations are handled by analysis_evaluate endpoint
         pass
 
+    general_requirements = []
+    if session.general_requirements_json:
+        try:
+            from tendermod.evaluation.schemas import GeneralRequirementList
+            gr = GeneralRequirementList.model_validate_json(session.general_requirements_json)
+            general_requirements = gr.requisitos
+        except Exception as exc:
+            logger.error('Error parseando general_requirements_json en step2: %s', exc)
+
     exp_form = ExperienceEditForm(initial=exp_initial)
     ind_form = IndicatorsEditForm(initial=ind_initial)
 
@@ -195,6 +208,8 @@ def analysis_step2(request, pk):
         'exp_initial_json': json.dumps(exp_initial),
         'system_threshold': SystemConfig.get_solo().threshold_objeto,
         'exp_data': exp_data,
+        'general_requirements': general_requirements,
+        'req_count': len(general_requirements),
     }
     return render(request, 'analysis/step2.html', context)
 
@@ -274,13 +289,107 @@ def analysis_results(request, pk):
             except Exception as exc:
                 logger.error('Error parseando indicators_result_json: %s', exc)
 
+    general_requirements = []
+    if session.general_requirements_json:
+        try:
+            from tendermod.evaluation.schemas import GeneralRequirementList
+            gr = GeneralRequirementList.model_validate_json(session.general_requirements_json)
+            general_requirements = gr.requisitos
+        except Exception as exc:
+            logger.error('Error parseando general_requirements_json en results: %s', exc)
+
     context = {
         'session': session,
         'result': result,
+        'general_requirements': general_requirements,
         'exp_result': exp_result,
         'ind_result': ind_result,
     }
     return render(request, 'analysis/results.html', context)
+
+
+# ---------------------------------------------------------------------------
+# Requisitos Generales: guardar estados del checklist
+# ---------------------------------------------------------------------------
+
+@require_POST
+def analysis_checklist_save(request, pk):
+    """
+    AJAX: recibe lista de {id, estado} y persiste los estados en general_requirements_json.
+    Body: {updates: [{id: 1, estado: "CUMPLE"}, ...]}
+    """
+    session = get_object_or_404(AnalysisSession, pk=pk)
+    try:
+        body = json.loads(request.body)
+        updates = {item['id']: item['estado'] for item in body.get('updates', [])}
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return JsonResponse({'error': 'Body JSON invalido'}, status=400)
+
+    if not session.general_requirements_json:
+        return JsonResponse({'error': 'No hay requisitos cargados'}, status=400)
+
+    try:
+        from tendermod.evaluation.schemas import GeneralRequirementList
+        req_list = GeneralRequirementList.model_validate_json(session.general_requirements_json)
+        for req in req_list.requisitos:
+            if req.id in updates:
+                req.estado = updates[req.id]
+        session.general_requirements_json = req_list.model_dump_json()
+        session.save(update_fields=['general_requirements_json', 'updated_at'])
+    except Exception as exc:
+        logger.error('Error guardando checklist para sesion %s: %s', pk, exc)
+        return JsonResponse({'error': str(exc)}, status=500)
+
+    return JsonResponse({'status': 'ok'})
+
+
+@require_POST
+def analysis_pliego_qa(request, pk):
+    """
+    Responde una pregunta sobre el pliego via RAG (sincrono).
+    Si add_as_requirement=True, agrega la respuesta como GeneralRequirement (origen="QA").
+    Body: {question: "...", add_as_requirement: bool, categoria: "OTRO"}
+    """
+    session = get_object_or_404(AnalysisSession, pk=pk)
+    try:
+        body = json.loads(request.body)
+        question = body.get('question', '').strip()
+        add_as_requirement = body.get('add_as_requirement', False)
+        categoria = body.get('categoria', 'OTRO')
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({'error': 'Body JSON invalido'}, status=400)
+
+    if not question:
+        return JsonResponse({'error': 'Pregunta vacia'}, status=400)
+
+    try:
+        from tendermod.evaluation.general_requirements_inference import ask_pliego
+        answer = ask_pliego(question, k=8)
+    except Exception as exc:
+        logger.error('Error en Q&A del pliego para sesion %s: %s', pk, exc)
+        return JsonResponse({'error': str(exc)}, status=500)
+
+    if add_as_requirement and answer and 'No se encontr' not in answer:
+        try:
+            from tendermod.evaluation.schemas import GeneralRequirementList, GeneralRequirement
+            req_list = GeneralRequirementList()
+            if session.general_requirements_json:
+                req_list = GeneralRequirementList.model_validate_json(session.general_requirements_json)
+            next_id = max((r.id for r in req_list.requisitos), default=0) + 1
+            req_list.requisitos.append(GeneralRequirement(
+                id=next_id,
+                categoria=categoria,
+                descripcion=f"[Q&A] {question[:120]}: {answer[:300]}",
+                obligatorio='NO_ESPECIFICADO',
+                estado='PENDIENTE',
+                origen='QA',
+            ))
+            session.general_requirements_json = req_list.model_dump_json()
+            session.save(update_fields=['general_requirements_json', 'updated_at'])
+        except Exception as exc:
+            logger.error('Error agregando requisito Q&A para sesion %s: %s', pk, exc)
+
+    return JsonResponse({'answer': answer, 'added': add_as_requirement})
 
 
 # ---------------------------------------------------------------------------
@@ -412,6 +521,46 @@ def export_excel(request, pk):
                     ws_sub.column_dimensions[col[0].column_letter].width = min(max_len + 4, 60)
         except Exception as exc:
             logger.warning('No se pudo generar hoja Sub-Requisitos: %s', exc)
+
+    # ---- Hoja: Checklist General ----
+    if session.general_requirements_json:
+        try:
+            from tendermod.evaluation.schemas import GeneralRequirementList
+            gr = GeneralRequirementList.model_validate_json(session.general_requirements_json)
+            if gr.requisitos:
+                ws_cl = wb.create_sheet('Checklist General')
+
+                cl_headers = ['#', 'Categoria', 'Descripcion', 'Obligatorio', 'Seccion', 'Pagina', 'Estado', 'Origen']
+                for col_num, header in enumerate(cl_headers, 1):
+                    cell = ws_cl.cell(row=1, column=col_num, value=header)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = Alignment(horizontal='center')
+
+                estado_fills = {
+                    'CUMPLE':    PatternFill('solid', fgColor='C6EFCE'),
+                    'NO_CUMPLE': PatternFill('solid', fgColor='FFC7CE'),
+                    'PENDIENTE': PatternFill('solid', fgColor='FFEB9C'),
+                    'N/A':       PatternFill('solid', fgColor='D9D9D9'),
+                }
+
+                for req in gr.requisitos:
+                    row_num = ws_cl.max_row + 1
+                    ws_cl.append([
+                        req.id, req.categoria, req.descripcion,
+                        req.obligatorio, req.seccion, req.pagina,
+                        req.estado, req.origen,
+                    ])
+                    fill = estado_fills.get(req.estado)
+                    if fill:
+                        for col in range(1, 9):
+                            ws_cl.cell(row=row_num, column=col).fill = fill
+
+                for col in ws_cl.columns:
+                    max_len = max((len(str(cell.value or '')) for cell in col), default=10)
+                    ws_cl.column_dimensions[col[0].column_letter].width = min(max_len + 4, 60)
+        except Exception as exc:
+            logger.warning('No se pudo generar hoja Checklist General: %s', exc)
 
     # ---- Generar respuesta ----
     output = BytesIO()
