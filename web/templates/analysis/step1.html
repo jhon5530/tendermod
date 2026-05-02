@@ -177,9 +177,19 @@
 
         <!-- Continue button -->
         <div class="d-flex justify-content-between align-items-center">
-            <a href="{% url 'analysis:new' %}" class="btn btn-outline-secondary">
-                <i class="bi bi-arrow-left me-1"></i>Nuevo PDF
-            </a>
+            <div class="d-flex gap-2 align-items-center" id="ocr-btn-container">
+                <a href="{% url 'analysis:new' %}" class="btn btn-outline-secondary">
+                    <i class="bi bi-arrow-left me-1"></i>Nuevo PDF
+                </a>
+                {% if session.ocr_document_path %}
+                <a id="btn-download-ocr"
+                   href="{% url 'analysis:download_ocr' pk=session.pk %}"
+                   class="btn btn-outline-info btn-sm"
+                   title="El PDF fue procesado con OCR. Descarga el texto extraído como Word.">
+                    <i class="bi bi-file-word me-1"></i>Descargar texto OCR (.docx)
+                </a>
+                {% endif %}
+            </div>
             <a href="{% url 'analysis:step2' pk=session.pk %}"
                class="btn btn-primary btn-lg {% if not has_experience and not has_indicators %}disabled{% endif %}"
                id="btn-continue">
@@ -228,6 +238,20 @@
 <script>
 var SESSION_ID = {{ session.pk }};
 var pdfReady = '{{ session.status }}' !== 'created' && '{{ session.status }}' !== 'ingesting_pdf';
+var OCR_DOWNLOAD_URL = "{% url 'analysis:download_ocr' pk=session.pk %}";
+
+function showOcrDownloadButton() {
+    if (document.getElementById('btn-download-ocr')) return;
+    var container = document.getElementById('ocr-btn-container');
+    if (!container) return;
+    var a = document.createElement('a');
+    a.id = 'btn-download-ocr';
+    a.href = OCR_DOWNLOAD_URL;
+    a.className = 'btn btn-outline-info btn-sm';
+    a.title = 'El PDF fue procesado con OCR. Descarga el texto extraído como Word.';
+    a.innerHTML = '<i class="bi bi-file-word me-1"></i>Descargar texto OCR (.docx)';
+    container.appendChild(a);
+}
 
 // If PDF is still being ingested, poll until ready
 {% if session.status == 'ingesting_pdf' or session.status == 'created' %}
@@ -242,6 +266,9 @@ if ('{{ session.celery_task_id }}') {
             document.getElementById('btn-extract-info').disabled = false;
             document.getElementById('btn-extract-general-req').disabled = false;
             pdfReady = true;
+            if (result && result.ocr_applied) {
+                showOcrDownloadButton();
+            }
         },
         function(err) {
             showError('spinner-ingest', 'Error en ingesta: ' + err + '. Vuelva a subir el PDF.');
@@ -259,6 +286,7 @@ function doExtractExperience() {
         function(result) {
             document.getElementById('btn-extract-experience').innerHTML =
                 '<i class="bi bi-briefcase me-1"></i>Re-extraer';
+            experienceExtracted = true;
             enableContinueIfReady();
         }
     );
@@ -273,6 +301,7 @@ function doExtractIndicators() {
         function(result) {
             document.getElementById('btn-extract-indicators').innerHTML =
                 '<i class="bi bi-bar-chart-line me-1"></i>Re-extraer';
+            indicatorsExtracted = true;
             enableContinueIfReady();
         }
     );

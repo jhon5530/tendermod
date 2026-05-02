@@ -25,17 +25,22 @@ Please adhere to the following response guidelines:
 -If the context is not provided, your response should also be: "Sorry, this is out of my knowledge base."
 
 
+CRITICAL RULES for the "valor" field:
+- The "valor" field MUST be a STRING that includes BOTH the comparison operator AND the numeric threshold, exactly as written in the document.
+- Examples of correct format: "Mayor o igual a 1.13", "Menor o igual a 0.84", "Mayor o igual a 1.00"
+- NEVER return just a number. "1.13" alone is WRONG. "Mayor o igual a 1.13" is CORRECT.
+- Use a dot (.) as the decimal separator in the output, even if the source uses a comma.
+
 Return the result ONLY as JSON matching this exact schema:
 
 {
   "answer": [
-    {"indicador": "Liquidez", "valor": 80},
-    {"indicador": "ROE", "valor": 65}
+    {"indicador": "Índice de Liquidez", "valor": "Mayor o igual a 1.13"},
+    {"indicador": "Nivel de Endeudamiento", "valor": "Menor o igual a 0.84"},
+    {"indicador": "Razón de cobertura de intereses", "valor": "Mayor o igual a 1.00"}
   ]
 }
 """
-# Other ideas
-"-All numeric values MUST be valid JSON numbers. Do NOT use thousand separators. Use a single dot (.) as decimal separator. Example: 307313925.5"
 
 # Define the user message template for indices
 qna_user_message_indices = """
@@ -67,12 +72,13 @@ Reglas:
 2. Un indicador CUMPLE si:
    - condicion = "Mayor o igual a" → valor_empresa >= umbral
    - condicion = "Menor o igual a" → valor_empresa <= umbral
-   - condicion = "Mayor que" → valor_empresa > umbral
-   - condicion = "Menor que" → valor_empresa < umbral
-3. Si el umbral requiere cálculo contextual (ej: "50% del presupuesto"), usa la información general del proceso para resolverlo.
-4. Si un indicador no tiene valor_empresa (None o faltante), márcalo como no evaluable.
-5. La evaluación final es "Cumple" si TODOS los indicadores evaluables cumplen, "No cumple" si alguno falla.
-6. Responde con: evaluación por indicador, conclusión final ("Cumple" o "No cumple"), y argumento breve.
+   - condicion = "Mayor que"       → valor_empresa > umbral
+   - condicion = "Menor que"       → valor_empresa < umbral
+3. Si "condicion" contiene texto libre (ej: "Mayor o igual a 1.13"), extrae tú mismo el operador y el umbral numérico del texto e interprétalos correctamente. NUNCA declares un indicador como no evaluable si hay suficiente información para comparar.
+4. Si el umbral requiere cálculo contextual (ej: "50% del presupuesto"), usa la información general del proceso para resolverlo.
+5. Si un indicador no tiene valor_empresa (None o faltante), márcalo como no evaluable.
+6. La evaluación final es "Cumple" si TODOS los indicadores evaluables cumplen, "No cumple" si alguno falla.
+7. Responde con: evaluación por indicador, conclusión final ("Cumple" o "No cumple"), y argumento breve.
 """
 
 basic_comparation_user_prompt = """
@@ -158,20 +164,25 @@ The agent must answer the following questions based on the contextual informatio
    Answer "NO_ESPECIFICADO" in all other cases (object is mentioned but not linked to experience requirements, or no information available).
 
 8- Does the tender list MULTIPLE INDEPENDENT experience sub-requirements, where each must be
-   satisfied by at least ONE SEPARATE contract? Look for patterns like:
+   satisfied by at least ONE SEPARATE contract? Look for ANY of these patterns:
    - "Al menos un (1) contrato con [X]" followed by "Al menos un (1) contrato con [Y]"
    - A numbered list where each item describes a different type of work/supply
-   Answer "MULTI_CONDICION" if such a pattern exists. Answer "GLOBAL" in all other cases.
+   - SEGMENTS or LOTS ("Segmento N", "Lote N") where each segment has its OWN minimum
+     value in SMMLV and its own specific technology focus. Example: "Segmento 1 - Seguridad
+     de Infraestructura: mínimo 6.000 SMMLV en contratos relacionados con NGFW; IPS/IDS..."
+     In this case EACH SEGMENT IS A SEPARATE SUB-REQUISITO with its own valor_minimo.
+   Answer "MULTI_CONDICION" if any such pattern exists. Answer "GLOBAL" in all other cases.
 
 9- If you answered "MULTI_CONDICION" in question 8, extract each sub-requirement as a
    separate entry in "Sub requisitos". For each sub-requirement provide:
-   - descripcion: the exact description from the pliego
+   - descripcion: the exact description from the pliego (include segment name and technologies)
    - codigos_unspsc: UNSPSC codes specific to this sub-req (inherit global list if not specified individually)
    - cantidad_minima_contratos: minimum number of contracts required (default 1)
-   - valor_minimo: minimum value if specified per sub-req, otherwise "None"
+   - valor_minimo: minimum value for THIS sub-req specifically (e.g. "6000 SMMLV", "3000 SMMLV"). "None" only if truly not specified.
    - objeto_exige_relevancia: "SI" if linked to the object of this process, "NO_ESPECIFICADO" otherwise
    If you answered "GLOBAL", return an empty list [].
    NEVER put the general object description as a sub-requisito.
+   CRITICAL: For segment-based pliegos, EVERY segment must appear as a separate sub-requisito with its own valor_minimo in SMMLV.
 
 It is acceptable not to have an answer to any of these questions and simply respond "I cannot find information on this," but never fabricate information. Only provide the answer. not the question.
 
@@ -192,13 +203,62 @@ Return only the result as JSON in the following format:
      "Sub requisitos": []
 }
 
-Example with sub-requirements (MULTI_CONDICION):
+Example with segment-based sub-requirements (MULTI_CONDICION):
+{
+     "Listado de codigos": ["432225", "432226", "432315"],
+     "Objeto": "Prestacion, venta, comercializacion y servicios relacionados con ciberseguridad",
+     "Objeto exige relevancia": "SI",
+     "Modo evaluacion": "MULTI_CONDICION",
+     "Sub requisitos": [
+         {
+             "descripcion": "Segmento 1 - Seguridad de Infraestructura: NGFW, IPS/IDS, SD-WAN, Anti-DDoS",
+             "codigos_unspsc": ["432225", "432226"],
+             "cantidad_minima_contratos": 1,
+             "valor_minimo": "6000 SMMLV",
+             "objeto_exige_relevancia": "SI"
+         },
+         {
+             "descripcion": "Segmento 2 - Seguridad de Endpoints y Dispositivos: EPP, EDR, MTD/EMM",
+             "codigos_unspsc": ["432332", "432334"],
+             "cantidad_minima_contratos": 1,
+             "valor_minimo": "3000 SMMLV",
+             "objeto_exige_relevancia": "SI"
+         }
+     ]
+}
+
+Example with contract-based sub-requirements (MULTI_CONDICION):
+When the pliego lists N numbered items like "Al menos uno (1) de los contratos deberá certificar
+actividades relacionadas con [X]", EACH numbered item is ONE separate sub-requisito — even if two
+items share the same base technology. Never merge or skip items.
+
 {
      "Modo evaluacion": "MULTI_CONDICION",
      "Sub requisitos": [
          {
-             "descripcion": "Al menos 1 contrato con suministro e instalacion de UPSs en Datacenters",
-             "codigos_unspsc": ["432217"],
+             "descripcion": "Al menos 1 contrato con suministro e instalacion de UPSs en Datacenters y/o Centros de Datos",
+             "codigos_unspsc": [],
+             "cantidad_minima_contratos": 1,
+             "valor_minimo": "None",
+             "objeto_exige_relevancia": "SI"
+         },
+         {
+             "descripcion": "Al menos 1 contrato con suministro e instalacion de sistemas de refrigeracion de precision en Datacenters y/o Centros de Datos",
+             "codigos_unspsc": [],
+             "cantidad_minima_contratos": 1,
+             "valor_minimo": "None",
+             "objeto_exige_relevancia": "SI"
+         },
+         {
+             "descripcion": "Al menos 1 contrato con mantenimientos correctivos y/o preventivos de UPSs en Datacenters y/o Centros de Datos",
+             "codigos_unspsc": [],
+             "cantidad_minima_contratos": 1,
+             "valor_minimo": "None",
+             "objeto_exige_relevancia": "SI"
+         },
+         {
+             "descripcion": "Al menos 1 contrato con mantenimientos correctivos y/o preventivos de sistemas de refrigeracion de precision en Datacenters y/o Centros de Datos",
+             "codigos_unspsc": [],
              "cantidad_minima_contratos": 1,
              "valor_minimo": "None",
              "objeto_exige_relevancia": "SI"
@@ -270,7 +330,6 @@ habilitantes, causales de rechazo, garantías, criterios de evaluación/ponderac
 
 EXCLUYE únicamente:
 - Indicadores financieros de ratio (liquidez, endeudamiento, rentabilidad, ROCE, ROE, ROA) — ya se procesan por separado.
-- Requisitos de experiencia UNSPSC detallados — ya se procesan por separado.
 
 == CATEGORÍAS ==
 - JURIDICO       : RUP, cámara de comercio, certificados tributarios, antecedentes disciplinarios/judiciales/fiscales
@@ -284,7 +343,10 @@ EXCLUYE únicamente:
 - OTRO           : cualquier otro requerimiento no clasificable en las anteriores
 
 == TIPOS ==
-- HABILITANTE    : cumple/no-cumple; oferta inhabilitada si no lo tiene
+- HABILITANTE-EXPERIENCIA: requisito de experiencia (acreditación de contratos, UNSPSC, objetos
+  de contratos previos, años de experiencia, valor mínimo de contratos). USA ESTE TIPO siempre
+  que el ítem sea de experiencia, aunque no mencione UNSPSC explícitamente.
+- HABILITANTE    : cumple/no-cumple; oferta inhabilitada si no lo tiene (no relacionado con experiencia)
 - PUNTUABLE      : otorga puntaje; la oferta no se rechaza por no tenerlo
 - DOCUMENTAL     : formulario o formato que debe acompañar la oferta
 - GARANTIA       : póliza o garantía exigida
@@ -300,6 +362,9 @@ EXCLUYE únicamente:
    - JAMÁS infieras, completes ni inventes un número de sección.
 
 2) TIPO vs CATEGORÍA:
+   - Un ítem de EXPERIENCIA (menciona contratos previos, años de experiencia, acreditación de
+     experiencia, UNSPSC, "experiencia general", "experiencia específica", "acreditar", "certificar
+     experiencia"): tipo="HABILITANTE-EXPERIENCIA", categoria="TECNICO" (o "CAPACIDAD" si aplica).
    - Un ítem CAUSAL_RECHAZO: categoria="CAUSAL_RECHAZO", tipo="CAUSAL_RECHAZO".
    - Un ítem de puntaje (contiene "puntos", "puntaje", "máximo X puntos"): tipo="PUNTUABLE",
      categoria="EVALUACION" (o "TECNICO" si es criterio técnico puntuable).
@@ -315,10 +380,21 @@ EXCLUYE únicamente:
 4) GRANULARIDAD:
    - Cada ítem numerado (2.23.1, 4.1.1.1, 5.1.3, 7.2.1, …) es UN ítem separado.
    - Si una sección define múltiples condiciones o perfiles numerados, cada uno es un ítem.
+   - CRITERIOS DE PUNTAJE: si dentro de una sección PUNTUABLE hay múltiples componentes que
+     tienen puntaje propio asignado (sea en tabla o en lista), cada componente es un ítem
+     PUNTUABLE independiente. Usa la misma "seccion" del padre para todos.
+     Ejemplo: si 4.2.2.1 asigna 4 pts al "Plan de Aseguramiento" y 6 pts a "Certificaciones ISO",
+     crea dos ítems con seccion="4.2.2.1", uno por cada componente con su puntaje.
 
 5) COMPLETITUD Y DEDUPLICACIÓN:
    - Revisa el contexto completo antes de responder.
    - Si un mismo requisito aparece en varias secciones, inclúyelo UNA SOLA VEZ.
+
+6) EXTRACTO DEL PLIEGO:
+   - El campo "extracto_pliego" debe contener la cita textual del fragmento del contexto que
+     origina el requisito. Máximo 100 palabras. Recorta con "..." si es necesario.
+   - Si el requisito se desprende de varios párrafos, elige el más representativo.
+   - Nunca inventes ni parafrasees: copia el texto tal como aparece en el contexto.
 
 Devuelve únicamente JSON válido con este formato exacto:
 {
@@ -333,7 +409,8 @@ Devuelve únicamente JSON válido con este formato exacto:
       "pagina": "12",
       "seccion": "5.1.1",
       "estado": "PENDIENTE",
-      "origen": "EXTRACCION"
+      "origen": "EXTRACCION",
+      "extracto_pliego": "Fragmento textual del pliego (máx 100 palabras) que origina este requisito..."
     }
   ]
 }

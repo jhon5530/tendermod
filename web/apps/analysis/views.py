@@ -6,7 +6,7 @@ import shutil
 
 from django.conf import settings
 from django.contrib import messages
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponse, FileResponse, Http404
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST, require_GET
 
@@ -403,7 +403,21 @@ def export_excel(request, pk):
     """
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.worksheet.table import Table, TableStyleInfo
     from io import BytesIO
+
+    def _apply_table_format(ws, table_name):
+        for row in ws.iter_rows(min_row=2):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True)
+        if ws.max_row >= 1 and ws.max_column >= 1:
+            tab = Table(displayName=table_name, ref=ws.dimensions)
+            tab.tableStyleInfo = TableStyleInfo(
+                name="TableStyleMedium2",
+                showFirstColumn=False, showLastColumn=False,
+                showRowStripes=True, showColumnStripes=False,
+            )
+            ws.add_table(tab)
 
     session = get_object_or_404(AnalysisSession, pk=pk)
 
@@ -431,12 +445,45 @@ def export_excel(request, pk):
 
     if result.indicators_result_json:
         try:
+            import re as _re
             from tendermod.evaluation.schemas import IndicatorComplianceResult
             ind_result = IndicatorComplianceResult.model_validate_json(result.indicators_result_json)
             cumple_str = 'CUMPLE' if ind_result.cumple else ('NO CUMPLE' if ind_result.cumple is False else 'INDETERMINADO')
-            ws_ind.append(['Resultado general', '', '', '', cumple_str, ind_result.detalle])
-            for nombre in ind_result.indicadores_evaluados:
-                ws_ind.append([nombre, '', '', '', '', ''])
+
+            # Parsear secciones numeradas del texto LLM
+            raw = ind_result.detalle.strip()
+            partes = _re.split(r'(?m)(?=^\d+\. )', raw)
+            secciones_numeradas = [p.strip() for p in partes if p.strip() and _re.match(r'^\d+\.', p.strip())]
+            # Texto de conclusión: lo que queda tras la última sección numerada
+            resto = _re.split(r'(?m)(?=^\*\*Conclusi)', raw)
+            conclusion_text = resto[-1].strip() if len(resto) > 1 else ''
+
+            if ind_result.indicadores_detalle:
+                for i, det in enumerate(ind_result.indicadores_detalle):
+                    cumple_ind = 'SI' if det.cumple else ('NO' if det.cumple is False else '-')
+                    val_str = f'{det.valor_empresa:g}' if det.valor_empresa is not None else ''
+                    umb_str = f'{det.umbral:g}' if det.umbral is not None else ''
+                    detalle_txt = secciones_numeradas[i] if i < len(secciones_numeradas) else ''
+                    row_num = ws_ind.max_row + 1
+                    ws_ind.append([det.indicador, val_str, det.condicion or '', umb_str, cumple_ind, detalle_txt])
+                    cell_cumple = ws_ind.cell(row=row_num, column=5)
+                    if det.cumple is True:
+                        cell_cumple.fill = PatternFill('solid', fgColor='C6EFCE')
+                    elif det.cumple is False:
+                        cell_cumple.fill = PatternFill('solid', fgColor='FFC7CE')
+            else:
+                for nombre in ind_result.indicadores_evaluados:
+                    ws_ind.append([nombre, '', '', '', '', ''])
+
+            # Fila de conclusión final
+            concl_row = ws_ind.max_row + 1
+            ws_ind.append(['CONCLUSION FINAL', '', '', '', cumple_str, conclusion_text])
+            concl_fill = (PatternFill('solid', fgColor='C6EFCE') if ind_result.cumple else
+                          PatternFill('solid', fgColor='FFC7CE') if ind_result.cumple is False else
+                          PatternFill('solid', fgColor='FFEB9C'))
+            for c in range(1, 7):
+                ws_ind.cell(row=concl_row, column=c).fill = concl_fill
+
         except Exception:
             ws_ind.append(['Error al parsear resultado de indicadores', '', '', '', '', ''])
 
@@ -444,9 +491,10 @@ def export_excel(request, pk):
     for col in ws_ind.columns:
         max_len = max((len(str(cell.value or '')) for cell in col), default=10)
         ws_ind.column_dimensions[col[0].column_letter].width = min(max_len + 4, 60)
+    _apply_table_format(ws_ind, "IndTable")
 
-    # ---- Hoja 2: Experiencia RUP ----
-    ws_exp = wb.create_sheet('Experiencia RUP')
+    # ---- Hoja 2: Experiencia (unificada: RUPs + Sub-Requisitos) ----
+    ws_exp = wb.create_sheet('Experiencia')
 
     exp_headers = ['NUMERO RUP', 'Cliente', 'Valor COP', 'Cumple Codigos',
                    'Cumple Valor', 'Cumple Objeto', 'Score Objeto',
@@ -463,6 +511,8 @@ def export_excel(request, pk):
         except Exception:
             return v
 
+    rup_end_row = 1
+
     if result.experience_result_json:
         try:
             from tendermod.evaluation.schemas import ExperienceComplianceResult
@@ -474,7 +524,7 @@ def export_excel(request, pk):
             ws_exp.cell(row=2, column=3, value=fmt_cop(exp_result.valor_requerido_cop) if exp_result.valor_requerido_cop else '')
             ws_exp.cell(row=2, column=9, value='CUMPLE' if exp_result.cumple else 'NO CUMPLE')
 
-            for i, rup in enumerate(exp_result.rups_evaluados, start=3):
+            for rup in exp_result.rups_evaluados:
                 ws_exp.append([
                     rup.numero_rup,
                     rup.cliente or '',
@@ -486,6 +536,38 @@ def export_excel(request, pk):
                     (rup.objeto_contrato or '')[:200],
                     'CUMPLE' if rup.cumple_total else 'NO CUMPLE',
                 ])
+
+            rup_end_row = ws_exp.max_row
+
+            # Sub-requisitos section (modo MULTI_CONDICION)
+            if exp_result.sub_requisitos_resultado:
+                sep_row = ws_exp.max_row + 1
+                sep_fill = PatternFill('solid', fgColor='2E4057')
+                sep_font_style = Font(bold=True, color='FFFFFF')
+                ws_exp.cell(row=sep_row, column=1, value='── SUB-REQUISITOS ──')
+                for c in range(1, len(exp_headers) + 1):
+                    ws_exp.cell(row=sep_row, column=c).fill = sep_fill
+                    ws_exp.cell(row=sep_row, column=c).font = sep_font_style
+
+                sub_header_row = sep_row + 1
+                sub_headers = ['NUMERO RUP', 'Sub-Requisito', 'Cumple', 'Score', 'Contrato que Cumple']
+                for col_num, hdr in enumerate(sub_headers, 1):
+                    c = ws_exp.cell(row=sub_header_row, column=col_num, value=hdr)
+                    c.font = header_font
+                    c.fill = header_fill
+                    c.alignment = Alignment(horizontal='center')
+
+                for sr in exp_result.sub_requisitos_resultado:
+                    ws_exp.append([
+                        sr.rup_elegido if sr.rup_elegido is not None else '',
+                        sr.descripcion,
+                        'CUMPLE' if sr.cumple else 'NO CUMPLE',
+                        f'{sr.score_objeto:.3f}' if sr.score_objeto is not None else 'N/A',
+                        (sr.objeto_contrato or '')[:200],
+                    ])
+                    for cell in ws_exp[ws_exp.max_row]:
+                        cell.alignment = Alignment(wrap_text=True)
+
         except Exception as exc:
             ws_exp.append([f'Error al parsear resultado de experiencia: {exc}'])
 
@@ -493,46 +575,35 @@ def export_excel(request, pk):
         max_len = max((len(str(cell.value or '')) for cell in col), default=10)
         ws_exp.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
 
-    # ---- Hoja 3: Sub-Requisitos (solo si hay datos MULTI_CONDICION) ----
-    if result.experience_result_json:
-        try:
-            from tendermod.evaluation.schemas import ExperienceComplianceResult as ECR
-            exp_check = ECR.model_validate_json(result.experience_result_json)
-            if exp_check.sub_requisitos_resultado:
-                ws_sub = wb.create_sheet('Sub-Requisitos')
-                sub_headers = ['NUMERO RUP', 'Sub-Requisito', 'Cumple', 'Score', 'Contrato que Cumple']
-                for col_num, header in enumerate(sub_headers, 1):
-                    cell = ws_sub.cell(row=1, column=col_num, value=header)
-                    cell.font = header_font
-                    cell.fill = header_fill
-                    cell.alignment = Alignment(horizontal='center')
-
-                for sr in exp_check.sub_requisitos_resultado:
-                    ws_sub.append([
-                        sr.rup_elegido if sr.rup_elegido is not None else '',
-                        sr.descripcion,
-                        'CUMPLE' if sr.cumple else 'NO CUMPLE',
-                        f'{sr.score_objeto:.3f}' if sr.score_objeto is not None else 'N/A',
-                        (sr.objeto_contrato or '')[:200],
-                    ])
-
-                for col in ws_sub.columns:
-                    max_len = max((len(str(cell.value or '')) for cell in col), default=10)
-                    ws_sub.column_dimensions[col[0].column_letter].width = min(max_len + 4, 60)
-        except Exception as exc:
-            logger.warning('No se pudo generar hoja Sub-Requisitos: %s', exc)
+    # Tabla solo sobre el bloque RUPs; sub-requisitos quedan fuera del rango
+    from openpyxl.utils import get_column_letter as _gcl
+    for row in ws_exp.iter_rows(min_row=2, max_row=max(rup_end_row, 1)):
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True)
+    if rup_end_row > 1:
+        rup_ref = f"A1:{_gcl(len(exp_headers))}{rup_end_row}"
+        tab_exp = Table(displayName="ExpTable", ref=rup_ref)
+        tab_exp.tableStyleInfo = TableStyleInfo(
+            name="TableStyleMedium2",
+            showFirstColumn=False, showLastColumn=False,
+            showRowStripes=True, showColumnStripes=False,
+        )
+        ws_exp.add_table(tab_exp)
 
     # ---- Hoja: Checklist General ----
     if session.general_requirements_json:
         try:
             from tendermod.evaluation.schemas import GeneralRequirementList
+            from django.conf import settings as _dj_settings
+            import urllib.parse as _urlparse
+            _pdf_link = _urlparse.quote(session.pdf_filename or '', safe='')
             gr = GeneralRequirementList.model_validate_json(session.general_requirements_json)
             if gr.requisitos:
                 ws_cl = wb.create_sheet('Checklist General')
 
                 cl_headers = [
-                    '#', 'Categoria', 'Tipo', 'Descripcion', 'Documento/Formato',
-                    'Obligatorio', 'Seccion', 'Pagina', 'Estado', 'Origen',
+                    '#', 'Categoria', 'Tipo', 'Descripcion', 'Extracto Pliego',
+                    'Documento/Formato', 'Obligatorio', 'Seccion', 'Pagina', 'Estado', 'Origen',
                 ]
                 for col_num, header in enumerate(cl_headers, 1):
                     cell = ws_cl.cell(row=1, column=col_num, value=header)
@@ -540,28 +611,42 @@ def export_excel(request, pk):
                     cell.fill = header_fill
                     cell.alignment = Alignment(horizontal='center')
 
-                estado_fills = {
-                    'CUMPLE':    PatternFill('solid', fgColor='C6EFCE'),
-                    'NO_CUMPLE': PatternFill('solid', fgColor='FFC7CE'),
-                    'PENDIENTE': PatternFill('solid', fgColor='FFEB9C'),
-                    'N/A':       PatternFill('solid', fgColor='D9D9D9'),
+                tipo_fills = {
+                    'HABILITANTE-EXPERIENCIA': PatternFill('solid', fgColor='D6E4BC'),  # verde oliva
+                    'HABILITANTE':    PatternFill('solid', fgColor='DEEAF1'),  # azul claro
+                    'PUNTUABLE':      PatternFill('solid', fgColor='E2EFDA'),  # verde claro
+                    'DOCUMENTAL':     PatternFill('solid', fgColor='FFF2CC'),  # amarillo claro
+                    'GARANTIA':       PatternFill('solid', fgColor='EAD1DC'),  # rosado claro
+                    'CAUSAL_RECHAZO': PatternFill('solid', fgColor='FCE4D6'),  # salmon claro
+                    'NO_ESPECIFICADO': PatternFill('solid', fgColor='F2F2F2'), # gris claro
                 }
 
                 for req in gr.requisitos:
                     row_num = ws_cl.max_row + 1
                     ws_cl.append([
                         req.id, req.categoria, req.tipo, req.descripcion,
+                        (req.extracto_pliego or '')[:600],
                         req.documento_formato, req.obligatorio, req.seccion,
                         req.pagina, req.estado, req.origen,
                     ])
-                    fill = estado_fills.get(req.estado)
+                    fill = tipo_fills.get(req.tipo)
                     if fill:
-                        for col in range(1, 11):
+                        for col in range(1, 12):
                             ws_cl.cell(row=row_num, column=col).fill = fill
+                    # Hipervínculo en columna Pagina (col 9) → abre PDF en la página indicada
+                    try:
+                        page_num = int(str(req.pagina).strip())
+                        pagina_cell = ws_cl.cell(row=row_num, column=9)
+                        pagina_cell.value = f'p.{page_num}'
+                        pagina_cell.hyperlink = f'{_pdf_link}#page={page_num}'
+                        pagina_cell.font = Font(color='0563C1', underline='single')
+                    except (ValueError, TypeError):
+                        pass
 
                 for col in ws_cl.columns:
                     max_len = max((len(str(cell.value or '')) for cell in col), default=10)
                     ws_cl.column_dimensions[col[0].column_letter].width = min(max_len + 4, 60)
+                _apply_table_format(ws_cl, "CLTable")
         except Exception as exc:
             logger.warning('No se pudo generar hoja Checklist General: %s', exc)
 
@@ -836,3 +921,42 @@ def analysis_quick_evaluate(request):
 
     logger.info('Tarea rapida %s lanzada para sesion %s (action=%s)', task.id, session.pk, action)
     return JsonResponse({'task_id': task.id, 'session_id': session.pk})
+
+
+@require_GET
+def download_ocr(request, pk):
+    """Descarga el documento Word generado por OCR para una sesión."""
+    from pathlib import Path
+    session = get_object_or_404(AnalysisSession, pk=pk)
+    if not session.ocr_document_path:
+        raise Http404("Esta sesión no tiene documento OCR generado.")
+    ocr_path = Path(session.ocr_document_path)
+    if not ocr_path.exists():
+        raise Http404("El archivo OCR no existe en el servidor.")
+    return FileResponse(
+        open(ocr_path, 'rb'),
+        as_attachment=True,
+        filename=ocr_path.name,
+        content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    )
+
+
+@require_POST
+def analysis_delete(request, pk):
+    """Elimina una sesión y limpia todos sus datos: BD, PDF en disco y OCR Word."""
+    from pathlib import Path
+    session = get_object_or_404(AnalysisSession, pk=pk)
+
+    # PDF original en disco (puede no existir si fue sobreescrito por otra sesión)
+    if session.pdf_filename:
+        (Path(settings.TENDERMOD_DATA_DIR) / session.pdf_filename).unlink(missing_ok=True)
+
+    # Documento OCR Word si existe
+    if session.ocr_document_path:
+        Path(session.ocr_document_path).unlink(missing_ok=True)
+
+    nombre = session.pdf_filename or f'sesión {pk}'
+    session.delete()  # CASCADE elimina AnalysisResult automáticamente
+
+    messages.success(request, f'Evaluación "{nombre}" eliminada correctamente.')
+    return redirect('analysis:list')

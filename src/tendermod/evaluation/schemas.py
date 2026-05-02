@@ -122,6 +122,7 @@ class GeneralRequirement(BaseModel):
     ]
     tipo: Literal[
         "HABILITANTE",
+        "HABILITANTE-EXPERIENCIA",
         "PUNTUABLE",
         "DOCUMENTAL",
         "GARANTIA",
@@ -135,10 +136,19 @@ class GeneralRequirement(BaseModel):
     seccion: str = "N/A"
     estado: Literal["PENDIENTE", "CUMPLE", "NO_CUMPLE", "N/A"] = "PENDIENTE"
     origen: Literal["EXTRACCION", "QA", "MANUAL"] = "EXTRACCION"
+    extracto_pliego: str = ""
 
 
 class GeneralRequirementList(BaseModel):
     requisitos: List[GeneralRequirement] = []
+
+
+class IndicatorDetail(BaseModel):
+    indicador: str
+    valor_empresa: Optional[float] = None
+    condicion: Optional[str] = None
+    umbral: Optional[float] = None
+    cumple: Optional[bool] = None
 
 
 class IndicatorComplianceResult(BaseModel):
@@ -146,6 +156,7 @@ class IndicatorComplianceResult(BaseModel):
     detalle: str = Field(default="", description="Texto completo del LLM con la argumentación")
     indicadores_evaluados: List[str] = Field(default=[], description="Nombres de indicadores que se compararon")
     indicadores_faltantes: List[str] = Field(default=[], description="Indicadores requeridos sin datos en SQLite")
+    indicadores_detalle: List[IndicatorDetail] = Field(default=[], description="Detalle por indicador: valor, condicion, umbral, cumple")
 
 
 class RupExperienceResult(BaseModel):

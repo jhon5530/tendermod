@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from tendermod.config.settings import CHROMA_PERSIST_DIR
@@ -27,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 # Límite de caracteres por bloque enviado al LLM (~90K tokens × 4 chars/token).
 _MAX_BLOCK_CHARS = 360_000
+# Máximo de llamadas LLM concurrentes (respetar rate limits de OpenAI).
+_MAX_WORKERS = 5
 
 
 def _get_pdf_path() -> str:
@@ -58,12 +61,8 @@ def get_general_requirements(k: int = 3) -> GeneralRequirementList:
         logger.warning("[get_general_requirements] No se detectaron capítulos relevantes")
         return GeneralRequirementList(requisitos=[])
 
-    all_requisitos: list[GeneralRequirement] = []
-    seen: set[tuple] = set()
-    next_id = 1
-
-    def _process_chapter(chapter: dict) -> None:
-        nonlocal next_id
+    def _fetch_chapter_requirements(chapter: dict) -> list[GeneralRequirement]:
+        """Extrae requerimientos de un capítulo (ejecutable en paralelo)."""
         title = chapter["title"]
         chapter_text = extract_page_range(pdf_path, chapter["start_page"], chapter["end_page"])
         n_chars = len(chapter_text)
@@ -73,67 +72,104 @@ def get_general_requirements(k: int = 3) -> GeneralRequirementList:
             title, chapter["start_page"] + 1, chapter["end_page"], n_chars // 4,
         )
 
-        if n_chars > _MAX_BLOCK_CHARS:
-            sub_blocks = [
-                chapter_text[i: i + _MAX_BLOCK_CHARS]
-                for i in range(0, n_chars, _MAX_BLOCK_CHARS)
-            ]
-            logger.info(
-                "[get_general_requirements] Capítulo grande → %d sub-bloques", len(sub_blocks)
-            )
-        else:
-            sub_blocks = [chapter_text]
+        sub_blocks = (
+            [chapter_text[i: i + _MAX_BLOCK_CHARS] for i in range(0, n_chars, _MAX_BLOCK_CHARS)]
+            if n_chars > _MAX_BLOCK_CHARS
+            else [chapter_text]
+        )
 
-        chapter_count = 0
+        results: list[GeneralRequirement] = []
         for block in sub_blocks:
             try:
                 partial = run_llm_requirements_from_chapter(block, title)
+                results.extend(partial.requisitos)
             except Exception as exc:
                 logger.error(
                     "[get_general_requirements] Error en capítulo '%s': %s", title, exc
                 )
-                continue
+        logger.info(
+            "[get_general_requirements] '%s': %d requerimientos extraídos", title, len(results)
+        )
+        return results
 
-            for req in partial.requisitos:
+    def _merge_results(raw_lists: list[list[GeneralRequirement]]) -> GeneralRequirementList:
+        """Deduplica y asigna IDs secuenciales."""
+        seen: set[tuple] = set()
+        merged: list[GeneralRequirement] = []
+        next_id = 1
+        for req_list in raw_lists:
+            for req in req_list:
                 key = (req.seccion, req.descripcion[:60].lower())
                 if key not in seen:
                     seen.add(key)
                     req.id = next_id
                     next_id += 1
-                    all_requisitos.append(req)
-                    chapter_count += 1
+                    merged.append(req)
+        return GeneralRequirementList(requisitos=merged)
 
-        logger.info(
-            "[get_general_requirements] '%s': %d requerimientos (total: %d)",
-            title, chapter_count, len(all_requisitos),
-        )
+    # ── Procesamiento paralelo de capítulos relevantes ──────────────────────
+    logger.info(
+        "[get_general_requirements] Procesando %d capítulos en paralelo (max %d workers)",
+        len(relevant_chapters), _MAX_WORKERS,
+    )
+    raw_results: list[list[GeneralRequirement]] = [[] for _ in relevant_chapters]
+    with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
+        future_to_idx = {
+            pool.submit(_fetch_chapter_requirements, ch): i
+            for i, ch in enumerate(relevant_chapters)
+        }
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                raw_results[idx] = future.result()
+            except Exception as exc:
+                logger.error(
+                    "[get_general_requirements] Hilo %d falló: %s", idx, exc
+                )
 
-    for chapter in relevant_chapters:
-        _process_chapter(chapter)
+    result = _merge_results(raw_results)
 
     # Re-intento si la cobertura es baja: procesar capítulos descartados
-    if len(all_requisitos) < 10:
+    if len(result.requisitos) < 10:
         logger.warning(
             "[get_general_requirements] Solo %d requisitos — re-intentando con capítulos no seleccionados",
-            len(all_requisitos),
+            len(result.requisitos),
         )
         remaining = [ch for ch in chapters if ch not in relevant_chapters]
-        for chapter in remaining[:5]:
-            chapter_text = extract_page_range(pdf_path, chapter["start_page"], chapter["end_page"])
-            if len(chapter_text) < 500:
-                continue
-            _process_chapter(chapter)
+        extra: list[list[GeneralRequirement]] = []
+        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
+            futures = []
+            for ch in remaining[:5]:
+                if len(extract_page_range(pdf_path, ch["start_page"], ch["end_page"])) >= 500:
+                    futures.append(pool.submit(_fetch_chapter_requirements, ch))
+            for future in as_completed(futures):
+                try:
+                    extra.append(future.result())
+                except Exception as exc:
+                    logger.error("[get_general_requirements] Re-intento falló: %s", exc)
+
+        # Merge extra sobre el resultado existente
+        seen_keys = {(r.seccion, r.descripcion[:60].lower()) for r in result.requisitos}
+        next_id = len(result.requisitos) + 1
+        for req_list in extra:
+            for req in req_list:
+                key = (req.seccion, req.descripcion[:60].lower())
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    req.id = next_id
+                    next_id += 1
+                    result.requisitos.append(req)
 
     logger.info(
         "[get_general_requirements] %d capítulos relevantes → %d requerimientos únicos",
-        len(relevant_chapters), len(all_requisitos),
+        len(relevant_chapters), len(result.requisitos),
     )
-    return GeneralRequirementList(requisitos=all_requisitos)
+    return result
 
 
 def ask_pliego(question: str, k: int = 8) -> str:
     """Responde preguntas en lenguaje natural sobre el pliego usando ChromaDB/RAG."""
-    docs = load_docs()
+    docs, _ = load_docs()
     chunks = chunk_docs(docs)
 
     vectorstore = read_vectorstore(embed_docs(), path=CHROMA_PERSIST_DIR)

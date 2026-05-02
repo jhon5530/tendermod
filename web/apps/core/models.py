@@ -23,6 +23,7 @@ class AnalysisSession(models.Model):
     # GeneralRequirementList.model_dump_json()
     general_requirements_json = models.TextField(blank=True, default='')
     celery_task_id = models.CharField(max_length=255, blank=True)
+    ocr_document_path = models.CharField(max_length=500, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

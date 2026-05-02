@@ -118,6 +118,27 @@ def run_llm_requirements_from_chapter(chapter_text: str, chapter_title: str) -> 
     return structured_llm.invoke(messages)
 
 
+def run_llm_experience_from_chapters(chapters_text: str):
+    """Extrae ExperienceResponse del texto completo de capítulos de experiencia."""
+    from tendermod.evaluation.prompts import qna_system_message_experience
+    from tendermod.evaluation.schemas import ExperienceResponse
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    structured_llm = llm.with_structured_output(ExperienceResponse)
+    user_content = (
+        "###Context\n"
+        + chapters_text
+        + "\n\n###Question\n"
+        "Extrae TODOS los requisitos de experiencia del proponente: "
+        "códigos UNSPSC, valor mínimo en SMMLV o COP por segmento, objeto requerido, "
+        "cantidad de contratos y cualquier segmento o sub-requisito independiente de experiencia."
+    )
+    messages = [
+        SystemMessage(content=qna_system_message_experience),
+        HumanMessage(content=user_content),
+    ]
+    return structured_llm.invoke(messages)
+
+
 def run_llm_chapter_detection(pages_text: str, total_pages: int) -> list[dict]:
     """
     Detecta capítulos y sus rangos de página desde las primeras páginas del PDF.

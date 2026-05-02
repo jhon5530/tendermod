@@ -9,6 +9,8 @@
 
 El dominio es contratacion publica colombiana — los terminos clave son: licitacion, pliego de condiciones, proponente, RUP (Registro Unico de Proponentes), UNSPSC (codigos de clasificacion de bienes/servicios), SMMLV.
 
+“When compacting, always preserve: the list of modified files, current test status, and any unresolved issues.”
+
 ---
 
 ## Stack tecnologico

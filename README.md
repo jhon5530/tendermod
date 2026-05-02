@@ -29,6 +29,10 @@ Actividades ejecutadas
 
 Proximos pasos
 - 0. Validar:
+  - Incluir puntos adicionales, ponderables
+  - Hay un problema con los indicadores, algo se rompio y no determina la regla.
+  - Claude Cowork sigue siendo mucho mejor para extraccion, comparar resultado de cowork, vs tendermod y validar una mejora
+- 0. Validar:
        - [ ] (TM) Fase 1:
         - [ ] Orden por valor para los que cumplan umbral (Proceso FNA Rafa)
         - [ ] Si hay experiencia general?

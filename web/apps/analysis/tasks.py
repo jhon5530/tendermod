@@ -22,12 +22,17 @@ def ingest_pdf_task(self, session_id):
         session.save(update_fields=['status', 'celery_task_id', 'updated_at'])
 
         logger.info('Ingiriendo PDF para sesion %s', session_id)
-        ingest_documents()
+        result = ingest_documents()
+        connection.close()  # ChromaDB usa SQLite propio; cerrar antes del siguiente save
 
         session.status = 'pdf_ready'
-        session.save(update_fields=['status', 'updated_at'])
+        session.ocr_document_path = result.get('ocr_docx_path') or ''
+        session.save(update_fields=['status', 'ocr_document_path', 'updated_at'])
+
+        if result.get('ocr_applied'):
+            logger.info('OCR aplicado para sesion %s — docx: %s', session_id, session.ocr_document_path)
         logger.info('PDF ingerido exitosamente para sesion %s', session_id)
-        return {'status': 'ok', 'session_id': session_id}
+        return {'status': 'ok', 'session_id': session_id, 'ocr_applied': result.get('ocr_applied', False)}
 
     except Exception as exc:
         logger.error('Error ingiriendo PDF para sesion %s: %s', session_id, exc)
@@ -265,21 +270,50 @@ def evaluate_indicators_task(self, session_id, ind_list):
         # Obtener nombres de indicadores para construir la query al SQL agent
         indicator_names = '\n'.join(item['indicador'] for item in ind_list)
         query_gold = (
-            'Devuelve un objeto JSON valido con los siguientes indicadores: '
-            f'\n{indicator_names}\n\n'
+            'Devuelve un objeto JSON valido con los siguientes indicadores financieros. '
+            'Busca en la tabla el indicador mas semanticamente cercano aunque el nombre sea diferente '
+            '(ej: "Utilidad operacional sobre activos" equivale a "RENTABILIDAD DEL ACTIVO", '
+            '"Nivel de Endeudamiento" equivale a "INDICE DE ENDEUDAMIENTO").\n\n'
+            f'Indicadores solicitados:\n{indicator_names}\n\n'
             'REGLAS:\n'
             '1) Responde EXCLUSIVAMENTE con JSON valido (un unico objeto).\n'
             '2) Prohibido: explicaciones, markdown, texto adicional, encabezados, bloques ```json.\n'
-            '3) Si un indicador no existe, no lo inventes: incluyelo en faltantes.\n'
-            '4) valor debe ser numero cuando sea posible.\n\n'
+            '3) El campo "nombre" DEBE ser EXACTAMENTE el nombre solicitado arriba, no el nombre de la columna en la DB.\n'
+            '4) Si realmente no hay ningun indicador similar en la DB, incluyelo en faltantes.\n'
+            '5) valor debe ser numero cuando sea posible.\n\n'
             'FORMATO (exacto):\n'
-            '{"indicadores":[{"nombre":"...","valor":0.0}]}'
+            '{"indicadores":[{"nombre":"nombre exacto solicitado","valor":0.0}],"faltantes":[]}'
         )
 
         gold_indicators = get_specific_gold_indicator(query_gold)
-        indicadores_emparejados = merge_indicators(tender_indicators_json, gold_indicators['output'])
 
+        # Obtener presupuesto para resolver umbrales relativos ("15% del POE")
         general_info = get_general_info('Cual es el presupuesto del proceso?', k=2)
+        from tendermod.evaluation.compare_indicators import _compute_cumple, _parse_budget_from_text
+        presupuesto = _parse_budget_from_text(general_info)
+
+        indicadores_emparejados = merge_indicators(tender_indicators_json, gold_indicators['output'],
+                                                   presupuesto=presupuesto)
+
+        from tendermod.evaluation.schemas import IndicatorDetail
+
+        def _safe_float(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        indicadores_detalle = [
+            IndicatorDetail(
+                indicador=item['indicador'],
+                valor_empresa=_safe_float(item.get('valor_empresa')),
+                condicion=item.get('condicion') if item.get('condicion') != item.get('umbral') else None,
+                umbral=_safe_float(item.get('umbral')),
+                cumple=_compute_cumple(item.get('valor_empresa'), item.get('condicion', ''), item.get('umbral')),
+            )
+            for item in indicadores_emparejados
+        ]
+
         comparation_response = run_llm_indicators_comparation(
             str(indicadores_emparejados), general_info
         )
@@ -291,6 +325,7 @@ def evaluate_indicators_task(self, session_id, ind_list):
             detalle=comparation_response,
             indicadores_evaluados=[item['indicador'] for item in ind_list],
             indicadores_faltantes=[],
+            indicadores_detalle=indicadores_detalle,
         )
 
         result, _ = AnalysisResult.objects.get_or_create(session=session)
@@ -418,21 +453,50 @@ def quick_evaluate_indicators_task(self, session_id, plain_text):
 
         indicator_names = '\n'.join(item['indicador'] for item in ind_list)
         query_gold = (
-            'Devuelve un objeto JSON valido con los siguientes indicadores: '
-            f'\n{indicator_names}\n\n'
+            'Devuelve un objeto JSON valido con los siguientes indicadores financieros. '
+            'Busca en la tabla el indicador mas semanticamente cercano aunque el nombre sea diferente '
+            '(ej: "Utilidad operacional sobre activos" equivale a "RENTABILIDAD DEL ACTIVO", '
+            '"Nivel de Endeudamiento" equivale a "INDICE DE ENDEUDAMIENTO").\n\n'
+            f'Indicadores solicitados:\n{indicator_names}\n\n'
             'REGLAS:\n'
             '1) Responde EXCLUSIVAMENTE con JSON valido (un unico objeto).\n'
             '2) Prohibido: explicaciones, markdown, texto adicional, encabezados, bloques ```json.\n'
-            '3) Si un indicador no existe, no lo inventes: incluyelo en faltantes.\n'
-            '4) valor debe ser numero cuando sea posible.\n\n'
+            '3) El campo "nombre" DEBE ser EXACTAMENTE el nombre solicitado arriba, no el nombre de la columna en la DB.\n'
+            '4) Si realmente no hay ningun indicador similar en la DB, incluyelo en faltantes.\n'
+            '5) valor debe ser numero cuando sea posible.\n\n'
             'FORMATO (exacto):\n'
-            '{"indicadores":[{"nombre":"...","valor":0.0}]}'
+            '{"indicadores":[{"nombre":"nombre exacto solicitado","valor":0.0}],"faltantes":[]}'
         )
 
         gold_indicators = get_specific_gold_indicator(query_gold)
-        indicadores_emparejados = merge_indicators(tender_indicators_json, gold_indicators['output'])
 
+        # Obtener presupuesto para resolver umbrales relativos ("15% del POE")
         general_info = get_general_info('Cual es el presupuesto del proceso?', k=2)
+        from tendermod.evaluation.compare_indicators import _compute_cumple, _parse_budget_from_text
+        presupuesto = _parse_budget_from_text(general_info)
+
+        indicadores_emparejados = merge_indicators(tender_indicators_json, gold_indicators['output'],
+                                                   presupuesto=presupuesto)
+
+        from tendermod.evaluation.schemas import IndicatorDetail
+
+        def _safe_float(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        indicadores_detalle = [
+            IndicatorDetail(
+                indicador=item['indicador'],
+                valor_empresa=_safe_float(item.get('valor_empresa')),
+                condicion=item.get('condicion') if item.get('condicion') != item.get('umbral') else None,
+                umbral=_safe_float(item.get('umbral')),
+                cumple=_compute_cumple(item.get('valor_empresa'), item.get('condicion', ''), item.get('umbral')),
+            )
+            for item in indicadores_emparejados
+        ]
+
         comparation_response = run_llm_indicators_comparation(
             str(indicadores_emparejados), general_info
         )
@@ -444,6 +508,7 @@ def quick_evaluate_indicators_task(self, session_id, plain_text):
             detalle=comparation_response,
             indicadores_evaluados=[item['indicador'] for item in ind_list],
             indicadores_faltantes=[],
+            indicadores_detalle=indicadores_detalle,
         )
 
         result, _ = AnalysisResult.objects.get_or_create(session=session)

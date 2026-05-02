@@ -15,7 +15,43 @@ def extract_compliance_bool(text: str) -> Optional[bool]:
     return None
 
 
-def merge_indicators(tender_indicators_json: dict, gold_indicators_str: str) -> list:
+def _compute_cumple(valor_empresa, condicion: str, umbral) -> 'Optional[bool]':
+    if valor_empresa is None or umbral is None:
+        return None
+    try:
+        v, u = float(valor_empresa), float(umbral)
+        return {"Mayor o igual a": v >= u, "Menor o igual a": v <= u,
+                "Mayor que": v > u, "Menor que": v < u}.get(condicion)
+    except (ValueError, TypeError):
+        return None
+
+
+def _normalize_indicator_name(name: str) -> str:
+    """Normaliza nombre de indicador: minúsculas, sin tildes, sin espacios extra."""
+    import unicodedata
+    nfkd = unicodedata.normalize('NFKD', str(name))
+    ascii_str = nfkd.encode('ascii', 'ignore').decode('ascii')
+    return ' '.join(ascii_str.lower().split())
+
+
+def _parse_budget_from_text(text: str) -> Optional[float]:
+    """Extrae el valor numérico del presupuesto de un texto con formato colombiano."""
+    if not text:
+        return None
+    m = re.search(r'\$\s*([\d.]+)', text)
+    if not m:
+        return None
+    raw = m.group(1)
+    if re.search(r'\d\.\d{3}', raw):
+        raw = raw.replace('.', '')
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def merge_indicators(tender_indicators_json: dict, gold_indicators_str: str,
+                     presupuesto: float = None) -> list:
     """
     Empareja los indicadores del pliego con los valores reales de la empresa.
     Parsea el campo 'valor' del pliego para separar operador y umbral numérico.
@@ -32,8 +68,11 @@ def merge_indicators(tender_indicators_json: dict, gold_indicators_str: str) -> 
             gold_data = gold_indicators_str
         gold_list = gold_data.get("indicadores", [])
         gold_map = {item["nombre"]: item["valor"] for item in gold_list}
+        # Mapa normalizado como fallback cuando el SQL agent devuelve nombres de la DB
+        gold_map_norm = {_normalize_indicator_name(k): v for k, v in gold_map.items()}
     except Exception:
         gold_map = {}
+        gold_map_norm = {}
 
     # Requisitos del pliego
     tender_list = tender_indicators_json.get("result", [])
@@ -47,42 +86,66 @@ def merge_indicators(tender_indicators_json: dict, gold_indicators_str: str) -> 
         condicion = None
         umbral = None
 
-        # Patrones: "Mayor o igual a 1.30", "Menor o igual a 0.78", "Mayor que X", etc.
+        # Patrones en orden de especificidad (más específico primero).
+        # mode: None=valor directo, "pct"=dividir/100, "pct_rel"=% del presupuesto
+        _OP_A = r'(?:a[l]?|que)'  # "a", "al", "que"
         patrones = [
-            (r'[Mm]enor o igual a\s+([\d.,]+)', "Menor o igual a"),
-            (r'[Mm]ayor o igual a\s+([\d.,]+)', "Mayor o igual a"),
-            (r'[Mm]enor que\s+([\d.,]+)', "Menor que"),
-            (r'[Mm]ayor que\s+([\d.,]+)', "Mayor que"),
+            # % relativo al presupuesto ("15 % del POE", "15% del presupuesto")
+            (rf'[Mm]ayor o igual {_OP_A}\s+([\d.,]+)\s*%\s+del', "Mayor o igual a", "pct_rel"),
+            (rf'[Mm]enor o igual {_OP_A}\s+([\d.,]+)\s*%\s+del', "Menor o igual a", "pct_rel"),
+            # % absoluto ("65%", "0.65%")
+            (rf'[Mm]enor o igual {_OP_A}\s+([\d.,]+)\s*%',       "Menor o igual a", "pct"),
+            (rf'[Mm]ayor o igual {_OP_A}\s+([\d.,]+)\s*%',       "Mayor o igual a", "pct"),
+            # Valores directos — variantes "a", "al", "que"
+            (rf'[Mm]enor o igual {_OP_A}\s+([\d.,]+)',            "Menor o igual a", None),
+            (rf'[Mm]ayor o igual {_OP_A}\s+([\d.,]+)',            "Mayor o igual a", None),
+            (r'[Nn]o\s+[Mm]ayor\s+(?:de|a|que)\s+([\d.,]+)',     "Menor o igual a", None),
+            (r'[Nn]o\s+[Mm]enor\s+(?:de|a|que)\s+([\d.,]+)',     "Mayor o igual a", None),
+            (r'[Mm]ínimo\s+([\d.,]+)',                            "Mayor o igual a", None),
+            (r'[Mm]inimo\s+([\d.,]+)',                            "Mayor o igual a", None),
+            (r'[Mm]áximo\s+([\d.,]+)',                            "Menor o igual a", None),
+            (r'[Mm]aximo\s+([\d.,]+)',                            "Menor o igual a", None),
+            (r'>=\s*([\d.,]+)',                                   "Mayor o igual a", None),
+            (r'<=\s*([\d.,]+)',                                   "Menor o igual a", None),
+            (r'[Mm]enor que\s+([\d.,]+)',                         "Menor que",       None),
+            (r'[Mm]ayor que\s+([\d.,]+)',                         "Mayor que",       None),
+            (r'>\s*([\d.,]+)',                                    "Mayor que",       None),
+            (r'<\s*([\d.,]+)',                                    "Menor que",       None),
         ]
-        for patron, op in patrones:
+        for patron, op, mode in patrones:
             m = re.search(patron, valor_texto)
             if m:
                 condicion = op
                 raw = m.group(1)
-                # Solo eliminar puntos si son separadores de miles colombianos
-                # (patrón: dígito.exactamente3dígitos, con múltiples grupos)
-                # Ejemplos: "1.000.000" → miles | "1.30" → decimal, NO tocar
+                # Normalizar separadores de miles colombianos
                 if ',' in raw:
-                    # Formato colombiano: puntos = miles, coma = decimal
                     raw = raw.replace('.', '').replace(',', '.')
                 elif re.search(r'\d\.\d{3}', raw) and raw.count('.') >= 2:
-                    # Múltiples puntos de miles: "1.000.000"
                     raw = raw.replace('.', '')
-                # else: punto único es decimal → dejar como está ("1.30", "0.78")
                 try:
-                    umbral = float(raw)
+                    val = float(raw)
+                    if mode == "pct_rel":
+                        umbral = (presupuesto * val / 100) if presupuesto else None
+                    elif mode == "pct":
+                        umbral = val / 100.0
+                    else:
+                        umbral = val
                 except ValueError:
                     umbral = None
                 break
 
-        # Si no se pudo parsear, dejar el texto original como umbral
+        # Fallback: pasar el texto completo para que el LLM de comparación lo interprete
         if condicion is None:
-            condicion = "ver descripción"
-            umbral = valor_texto  # texto completo para que el LLM lo interprete
+            condicion = valor_texto  # e.g. "Mayor o igual a 1.13" sin parsear
+            umbral = valor_texto
+
+        valor_empresa = gold_map.get(nombre)
+        if valor_empresa is None:
+            valor_empresa = gold_map_norm.get(_normalize_indicator_name(nombre))
 
         resultado.append({
             "indicador": nombre,
-            "valor_empresa": gold_map.get(nombre),
+            "valor_empresa": valor_empresa,
             "condicion": condicion,
             "umbral": umbral,
         })

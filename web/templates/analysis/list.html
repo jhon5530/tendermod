@@ -104,6 +104,15 @@
                                    class="btn btn-outline-secondary" title="Descargar TXT">
                                     <i class="bi bi-file-earmark-text"></i>
                                 </a>
+                                <form method="post"
+                                      action="{% url 'analysis:delete' pk=session.pk %}"
+                                      style="display:inline"
+                                      onsubmit="return confirm('¿Eliminar la evaluación «{{ session.pdf_filename|default:session.pk }}»?\nSe borrarán el PDF y todos los datos asociados. Esta acción no se puede deshacer.')">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-outline-danger btn-sm" title="Eliminar">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
                             </div>
                         </td>
                     </tr>

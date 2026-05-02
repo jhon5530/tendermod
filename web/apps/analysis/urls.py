@@ -18,4 +18,6 @@ urlpatterns = [
     path('<int:pk>/export/context/', views.export_context, name='export_context'),
     path('<int:pk>/checklist/save/', views.analysis_checklist_save, name='checklist_save'),
     path('<int:pk>/pliego/qa/', views.analysis_pliego_qa, name='pliego_qa'),
+    path('<int:pk>/download-ocr/', views.download_ocr, name='download_ocr'),
+    path('<int:pk>/delete/', views.analysis_delete, name='delete'),
 ]

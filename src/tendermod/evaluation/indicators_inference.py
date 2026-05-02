@@ -16,7 +16,7 @@ def get_indicators(user_input: str, k) -> MultipleIndicatorResponse:
     
 
     # Load docs and chunking
-    docs = load_docs()
+    docs, _ = load_docs()
     #chunks = []
     chunks = chunk_docs(docs)
 
@@ -54,7 +54,7 @@ def get_general_info(user_input: str, k) -> MultipleIndicatorResponse:
     print("Getting general Info\n")
 
     # Load docs and chunking
-    docs = load_docs()
+    docs, _ = load_docs()
     chunks = chunk_docs(docs)
 
 
