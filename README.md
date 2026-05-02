@@ -21,47 +21,18 @@ Actividades ejecutadas
  - Correccion de errores en interpretacion de presupuesto.
  - Creacion de interfaz grafica
 - (08-04-26)  Se realizo ajuste de subrequisitos para evaluar experiencias especificas puntuales
-
-
-
-
+- (01-05-26)  Ajustes a extraccion, afinamiento de extraccion y de resultados en Excel.
 
 
 Proximos pasos
-- 0. Validar:
-  - Incluir puntos adicionales, ponderables
-  - Hay un problema con los indicadores, algo se rompio y no determina la regla.
-  - Claude Cowork sigue siendo mucho mejor para extraccion, comparar resultado de cowork, vs tendermod y validar una mejora
-- 0. Validar:
-       - [ ] (TM) Fase 1:
-        - [ ] Orden por valor para los que cumplan umbral (Proceso FNA Rafa)
-        - [ ] Si hay experiencia general?
-        - [ ] Si hay experiencias especificas?
-        - [ ] Si son las mismas?
-        - [ ] No funcionan esas experiencias especificas
-        - [ ] Análisis semántico.
-- 1. Adicionar fragmentos de texto de experiencia que se tuvo en cuenta para la evaluacion, junto con sus paginas. Esto para que el humano que revise la experiencia tenga rapidamente un punto de comparacion del requerimiento textual del pliego vs el resultado de la evaluacion, esto tambien adicionarlo al .txt descargable.
-- 2. Corregir errores como:
- - No funciona la funcion de evaluar objeto (Pareciera que no busca los resultados mas cercanos al objeto sino que parte por los de mayor valor y cumplimiento de codigos).
- - No funciona si no evaluo todos los pasos.
- - Adicion de umbral:
-- 3. Adicionar modulo requerimientos generales.
-- 4. Entregar un informe general en un word de cumplimiento.
- 
-
-- Formato de valores en la interfaz grafica
-
-
- - No esta almacenando la informacion cuando edito sobre el paso 2, eso quiere decir que cuando me devuelvo sigue con la info original.
-
-
-
-- Generar una version 1 de una interfaz grafica que permita:
-   - Cargar los archivos de la licitacion
-   - Ejecutar el agente para que interpreta y devuelva los resultados esperados.
-
-
-
+- Validar Fase 2 (Evaluacion):
+   - Usar informacion de experiencia para evaluar experiencia
+   - Complementar base de datos con informacion de certificaciones y demas requerimientos.
+   
+- Validar Fase 3 (Cargar mas archivos):
+   - Generar una version 1 de una interfaz grafica que permita:
+      - Cargar los archivos de la licitacion
+      - Ejecutar el agente para que interpreta y devuelva los resultados esperados.
 
 
 Mejoras
