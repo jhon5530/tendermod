@@ -17,43 +17,63 @@
 
 <!-- DB Status Cards -->
 <div class="row g-3 mb-4" id="db-status-cards">
-    <div class="col-md-4">
+    <div class="col-md-2">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body text-center">
                 <div class="fs-1 text-primary fw-bold" id="count-indicadores">
                     <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
                 </div>
-                <p class="text-muted mb-0">Registros en <strong>indicadores</strong></p>
+                <p class="text-muted mb-0 small">Registros en <strong>indicadores</strong></p>
             </div>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body text-center">
                 <div class="fs-1 text-success fw-bold" id="count-experiencia">
                     <div class="spinner-border spinner-border-sm text-success" role="status"></div>
                 </div>
-                <p class="text-muted mb-0">Registros en <strong>experiencia</strong></p>
+                <p class="text-muted mb-0 small">Registros en <strong>experiencia</strong></p>
             </div>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-2">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body text-center">
+                <div class="fs-1 text-info fw-bold" id="count-personas">
+                    <div class="spinner-border spinner-border-sm text-info" role="status"></div>
+                </div>
+                <p class="text-muted mb-0 small">Personas en <strong>equipo</strong></p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body text-center">
+                <div class="fs-1 text-warning fw-bold" id="count-certificaciones">
+                    <div class="spinner-border spinner-border-sm text-warning" role="status"></div>
+                </div>
+                <p class="text-muted mb-0 small">Registros en <strong>certificaciones</strong></p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body text-center">
                 <div class="fs-3 fw-bold" id="db-exists-icon">
                     <div class="spinner-border spinner-border-sm" role="status"></div>
                 </div>
-                <p class="text-muted mb-0">Estado base de datos</p>
+                <p class="text-muted mb-0 small">Estado base de datos</p>
             </div>
         </div>
     </div>
 </div>
 
 <!-- Upload forms -->
-<div class="row g-4">
+<div class="row g-4 row-cols-1 row-cols-md-3">
 
     <!-- Indicadores -->
-    <div class="col-md-6">
+    <div class="col">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header card-header-tendermod">
                 <h5 class="mb-0">
@@ -80,9 +100,15 @@
                         {% endif %}
                         <div class="form-text">{{ form_indicadores.archivo.help_text }}</div>
                     </div>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-upload me-1"></i>Cargar indicadores
-                    </button>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-upload me-1"></i>Cargar indicadores
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm"
+                                onclick="confirmClear('{% url 'redneet:clear_indicadores' %}', 'Indicadores Financieros', 'Se vaciará la tabla indicadores y se eliminará el archivo rib.xlsx.')">
+                            <i class="bi bi-trash me-1"></i>Borrar datos
+                        </button>
+                    </div>
                 </form>
 
                 {% if task_id_indicadores %}
@@ -99,7 +125,7 @@
     </div>
 
     <!-- Experiencia -->
-    <div class="col-md-6">
+    <div class="col">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header card-header-tendermod">
                 <h5 class="mb-0">
@@ -126,9 +152,15 @@
                         {% endif %}
                         <div class="form-text">{{ form_experiencia.archivo.help_text }}</div>
                     </div>
-                    <button type="submit" class="btn btn-success">
-                        <i class="bi bi-upload me-1"></i>Cargar experiencia
-                    </button>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-upload me-1"></i>Cargar experiencia
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm"
+                                onclick="confirmClear('{% url 'redneet:clear_experiencia' %}', 'Experiencia RUP', 'Se vaciará la tabla experiencia en SQLite y se eliminará el índice ChromaDB de experiencia.')">
+                            <i class="bi bi-trash me-1"></i>Borrar datos
+                        </button>
+                    </div>
                 </form>
 
                 {% if task_id_experiencia %}
@@ -140,6 +172,92 @@
                     </div>
                 </div>
                 {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Equipo de Trabajo -->
+    <div class="col">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header card-header-tendermod">
+                <h5 class="mb-0">
+                    <i class="bi bi-people me-2"></i>Equipo de Trabajo
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">
+                    Suba el archivo <code>CERTIFICACIONES_PERSONAL.xlsx</code> con las hojas
+                    <strong>Personas</strong> y <strong>Certificaciones</strong>.
+                    Se cargara en las tablas <strong>personas</strong> y <strong>certificaciones</strong>.
+                </p>
+
+                <form method="post" enctype="multipart/form-data" action="{% url 'redneet:upload_equipo' %}">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="id_archivo_eq" class="form-label fw-semibold">
+                            {{ form_equipo.archivo.label }}
+                        </label>
+                        <input type="file" name="archivo" accept=".xlsx"
+                               class="form-control{% if form_equipo.archivo.errors %} is-invalid{% endif %}"
+                               id="id_archivo_eq" required>
+                        {% if form_equipo.archivo.errors %}
+                            <div class="invalid-feedback">{{ form_equipo.archivo.errors.0 }}</div>
+                        {% endif %}
+                        <div class="form-text">{{ form_equipo.archivo.help_text }}</div>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button type="submit" class="btn btn-info text-white">
+                            <i class="bi bi-upload me-1"></i>Cargar equipo
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm"
+                                onclick="confirmClear('{% url 'redneet:clear_equipo' %}', 'Equipo de Trabajo', 'Se vaciarán las tablas personas y certificaciones.')">
+                            <i class="bi bi-trash me-1"></i>Borrar datos
+                        </button>
+                    </div>
+                </form>
+
+                {% if task_id_equipo %}
+                <hr>
+                <div id="spinner-equipo">
+                    <div class="d-flex align-items-center gap-2 text-secondary">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                        <span>Cargando datos del equipo...</span>
+                    </div>
+                </div>
+                {% endif %}
+
+                <hr>
+                <a href="{% url 'analysis:team_qa' %}" class="btn btn-outline-info btn-sm">
+                    <i class="bi bi-chat-dots me-1"></i>Consultar equipo
+                </a>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Modal de confirmación de borrado -->
+<div class="modal fade" id="clearModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0">
+                <h5 class="modal-title text-danger">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>Confirmar borrado
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>¿Está seguro de que desea borrar los datos de <strong id="clearModalTarget"></strong>?</p>
+                <p class="text-muted small mb-0" id="clearModalDetail"></p>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <form id="clearModalForm" method="post">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-trash me-1"></i>Sí, borrar
+                    </button>
+                </form>
             </div>
         </div>
     </div>
@@ -160,6 +278,13 @@
 
 {% block extra_js %}
 <script>
+function confirmClear(url, target, detail) {
+    document.getElementById('clearModalTarget').textContent = target;
+    document.getElementById('clearModalDetail').textContent = detail;
+    document.getElementById('clearModalForm').action = url;
+    new bootstrap.Modal(document.getElementById('clearModal')).show();
+}
+
 // CSRF token helper
 function getCsrfToken() {
     var el = document.querySelector('[name=csrfmiddlewaretoken]');
@@ -173,6 +298,8 @@ function refreshDbStatus() {
         .then(function(data) {
             document.getElementById('count-indicadores').textContent = data.indicadores || 0;
             document.getElementById('count-experiencia').textContent = data.experiencia || 0;
+            document.getElementById('count-personas').textContent = data.personas || 0;
+            document.getElementById('count-certificaciones').textContent = data.certificaciones || 0;
             var iconEl = document.getElementById('db-exists-icon');
             if (data.db_exists) {
                 iconEl.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
@@ -214,6 +341,19 @@ pollTask(
     },
     function(err) {
         showError('spinner-experiencia', 'Error: ' + err);
+    }
+);
+{% endif %}
+
+{% if task_id_equipo %}
+pollTask(
+    '{{ task_id_equipo }}',
+    function(result) {
+        showSuccess('spinner-equipo', 'Datos del equipo cargados correctamente');
+        refreshDbStatus();
+    },
+    function(err) {
+        showError('spinner-equipo', 'Error: ' + err);
     }
 );
 {% endif %}

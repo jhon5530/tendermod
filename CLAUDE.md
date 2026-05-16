@@ -165,15 +165,38 @@ ENV=local
 - `Indicator`: `{indicador: str, valor: Union[str, float]}`
 - `MultipleIndicatorResponse`: `{answer: List[Indicator]}`
 - `ExperienceResponse`: codigos UNSPSC, cantidad, objeto, contratos, valor, pagina, seccion
+- `IndicatorDetail`: `{indicador, valor_empresa, condicion, umbral, cumple}` — detalle por indicador
+- `IndicatorComplianceResult`: incluye `indicadores_detalle: List[IndicatorDetail]` para el Excel
+- `GeneralRequirement`: incluye `extracto_pliego` (cita textual del pliego, max 100 palabras)
+
+### Comparacion de indicadores (compare_indicators.py)
+- `merge_indicators(tender_json, gold_json, presupuesto=None)`: empareja indicadores del pliego con valores de la empresa. Parsea condicion y umbral con regex que maneja variantes del espanol: "Mayor/Menor o igual a/al/que", "minimo/maximo", "%", "% del POE". Para umbrales relativos al presupuesto ("15% del POE"), requiere el parametro `presupuesto` (float, pesos colombianos).
+- `_parse_budget_from_text(text)`: extrae el valor del presupuesto oficial (POE) desde el texto de `general_info`. Busca patron `$X.XXX.XXX.XXX`.
+- `_compute_cumple(valor_empresa, condicion, umbral)`: calculo deterministico de cumplimiento. Retorna `None` si alguno de los valores es `None`.
+- En `tasks.py`, `general_info` se obtiene ANTES de `merge_indicators` para poder resolver umbrales POE-relativos.
+
+### Extraccion de requisitos generales (general_requirements_inference.py)
+- Flujo por capitulos completos (sin RAG): detecta capitulos via TOC nativo → LLM → heuristica.
+- `filter_relevant_chapters()`: filtra por keywords en el titulo (`REQUIREMENT_KEYWORDS` en `chapter_extractor.py`).
+- `_MAX_BLOCK_CHARS = 20_000`: limite critico. Con bloques mas grandes (>40K), gpt-4o-mini pierde atencion en sub-componentes de puntaje dentro de tablas ("lost in the middle"). Reducir este valor mejora la granularidad de extraccion de criterios PUNTUABLES con puntaje propio por componente.
+- Regla de granularidad en el prompt: cada componente con puntaje propio (en tabla o lista) se extrae como item PUNTUABLE independiente, usando la seccion padre.
 
 ### Codigos UNSPSC (compare_experience.py)
 - Se normalizan a prefijo de 6 digitos (`normalize_to_prefix6`)
 - Validacion por `AND` o score minimo (`min_codigos`) sobre columnas de la tabla `experiencia`
 - Resultado: lista de `NUMERO RUP` que cumplen
 
+### Web Django (web/)
+- Stack: Django + Celery (pool=solo) + Redis
+- `web/apps/analysis/`: views, tasks, models (`AnalysisSession`, `AnalysisResult`)
+- `web/apps/core/models.py`: modelos principales
+- `web/tendermod_web/celery.py`: configuracion Celery con `task_postrun` → `connections.close_all()` y `connection_created` → `PRAGMA busy_timeout=10000` para evitar conflictos SQLite/ChromaDB
+- ChromaDB es **global** (un solo indice compartido entre sesiones). Al eliminar una sesion NO se borra ChromaDB — solo el PDF, el OCR Word y los registros de BD.
+- Celery debe iniciarse con `--pool=solo` para evitar conflictos de fork con ChromaDB.
+
 ---
 
-## Estado actual del desarrollo (marzo 2026)
+## Estado actual del desarrollo (mayo 2026)
 
 ### Implementado y funcionando
 - Ingesta de PDF de licitacion a ChromaDB
@@ -184,15 +207,11 @@ ENV=local
 - Comparacion de indicadores via SQL Agent + LLM
 - Validacion de experiencia por codigos UNSPSC contra SQLite
 - Validacion de objeto/descripcion por similitud semantica (ChromaDB, umbral 0.75)
-- Campo `objeto_contrato` en `RupExperienceResult` para trazabilidad del contrato elegido
-- Exportacion TXT con detalle completo por RUP (score, contrato elegido, campos globales)
-- Exportacion Excel con columna `Contrato Elegido` en hoja Experiencia RUP
-- Interfaz web Django (MVP) en `web/` con evaluacion rapida y resultados
-
-### Pendiente (TODOs identificados en el codigo)
-- `compare_experience.py`: validar valor total a acreditar de la experiencia (campo `valor_requerido_cop`)
-- `main.py`: la funcion `indicators_routine()` referencia `evaluate_indicators_compliance` que no existe (codigo legacy)
-- Mejorar separacion de `CHROMA_PERSIST_DIR` y `CHROMA_EXPERIENCE_PERSIST_DIR` en settings
+- Exportacion Excel multi-hoja (Indicadores por fila, Experiencia RUP unificada, Checklist General)
+- Exportacion TXT con detalle completo por RUP
+- Interfaz web Django completa en `web/` con flujo paso a paso, historial y evaluacion rapida
+- Extraccion de requisitos generales por capitulos completos del PDF (sin RAG)
+- Eliminacion de sesiones desde el historial (borra PDF, OCR Word y registros BD; ChromaDB es global)
 
 ---
 

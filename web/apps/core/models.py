@@ -14,6 +14,7 @@ class AnalysisSession(models.Model):
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='created')
     pdf_filename = models.CharField(max_length=255, blank=True)
+    display_name = models.CharField(max_length=255, blank=True, default='')
     # ExperienceResponse.model_dump_json()
     experience_requirements_json = models.TextField(blank=True)
     # MultipleIndicatorResponse.model_dump_json()

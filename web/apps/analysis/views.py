@@ -612,7 +612,8 @@ def export_excel(request, pk):
                     cell.alignment = Alignment(horizontal='center')
 
                 tipo_fills = {
-                    'HABILITANTE-EXPERIENCIA': PatternFill('solid', fgColor='D6E4BC'),  # verde oliva
+                    'HABILITANTE-EXPERIENCIA':  PatternFill('solid', fgColor='D6E4BC'),  # verde oliva
+                    'HABILITANTE-INDICADORES':  PatternFill('solid', fgColor='D9E1F2'),  # azul lavanda
                     'HABILITANTE':    PatternFill('solid', fgColor='DEEAF1'),  # azul claro
                     'PUNTUABLE':      PatternFill('solid', fgColor='E2EFDA'),  # verde claro
                     'DOCUMENTAL':     PatternFill('solid', fgColor='FFF2CC'),  # amarillo claro
@@ -633,6 +634,11 @@ def export_excel(request, pk):
                     if fill:
                         for col in range(1, 12):
                             ws_cl.cell(row=row_num, column=col).fill = fill
+                    # Categoría EXPERIENCIA tiene color propio (naranja) que sobrescribe el tipo
+                    if req.categoria == 'EXPERIENCIA':
+                        exp_fill = PatternFill('solid', fgColor='FFE4B5')
+                        for col in range(1, 12):
+                            ws_cl.cell(row=row_num, column=col).fill = exp_fill
                     # Hipervínculo en columna Pagina (col 9) → abre PDF en la página indicada
                     try:
                         page_num = int(str(req.pagina).strip())
@@ -939,6 +945,58 @@ def download_ocr(request, pk):
         filename=ocr_path.name,
         content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     )
+
+
+def download_pdf(request, pk):
+    """Descarga el PDF de licitación ingresado en la sesión."""
+    from pathlib import Path
+    session = get_object_or_404(AnalysisSession, pk=pk)
+    if not session.pdf_filename:
+        raise Http404("Esta sesión no tiene PDF asociado.")
+    pdf_path = Path(settings.TENDERMOD_DATA_DIR) / session.pdf_filename
+    if not pdf_path.exists():
+        raise Http404("El archivo PDF no existe en el servidor.")
+    return FileResponse(
+        open(pdf_path, 'rb'),
+        as_attachment=True,
+        filename=session.pdf_filename,
+        content_type='application/pdf',
+    )
+
+
+@require_POST
+def session_rename(request, pk):
+    """Actualiza el display_name de una sesión (AJAX)."""
+    session = get_object_or_404(AnalysisSession, pk=pk)
+    try:
+        body = json.loads(request.body)
+        name = body.get('name', '').strip()
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({'error': 'Body JSON inválido'}, status=400)
+    session.display_name = name
+    session.save(update_fields=['display_name', 'updated_at'])
+    return JsonResponse({'ok': True, 'name': name or session.pdf_filename})
+
+
+def team_qa(request):
+    """Página de Evaluación Equipo: chat en lenguaje natural contra SQLite."""
+    return render(request, 'analysis/team_qa.html')
+
+
+@require_POST
+def team_qa_query(request):
+    """Endpoint síncrono: pregunta → SQL Agent → respuesta."""
+    body = json.loads(request.body)
+    question = body.get('question', '').strip()
+    if not question:
+        return JsonResponse({'error': 'Pregunta vacía'}, status=400)
+    try:
+        from tendermod.evaluation.team_inference import ask_team
+        answer = ask_team(question)
+        return JsonResponse({'answer': answer})
+    except Exception as exc:
+        logger.error('team_qa_query error: %s', exc)
+        return JsonResponse({'error': str(exc)}, status=500)
 
 
 @require_POST

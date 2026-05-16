@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Union, Optional, Literal
+from typing import List, Union, Optional, Literal, Annotated
 
 class ExperienceSubRequirement(BaseModel):
     """Un sub-requisito de experiencia especifica del pliego."""
@@ -118,11 +118,13 @@ class GeneralRequirement(BaseModel):
         "GARANTIA",
         "CAUSAL_RECHAZO",
         "EVALUACION",
+        "EXPERIENCIA",
         "OTRO",
     ]
     tipo: Literal[
         "HABILITANTE",
         "HABILITANTE-EXPERIENCIA",
+        "HABILITANTE-INDICADORES",
         "PUNTUABLE",
         "DOCUMENTAL",
         "GARANTIA",
@@ -212,3 +214,31 @@ class ExperienceComplianceResult(BaseModel):
     )
     sub_requisitos_cumplidos: int = Field(default=0, description="Cantidad de sub-requisitos que cumplen")
     sub_requisitos_totales: int = Field(default=0, description="Cantidad total de sub-requisitos evaluados")
+
+
+class TeamQuery(BaseModel):
+    """Intención parseada de una pregunta sobre el equipo de la empresa."""
+    action: Literal["count", "list", "detail"] = Field(
+        default="list",
+        description="count=cuántos, list=quiénes/qué, detail=info completa con fechas",
+    )
+    filter_cert: Optional[str] = Field(
+        default=None,
+        description="Término parcial del nombre de certificación (ej: 'CCNA', 'Crowdstrike', 'CCNP')",
+    )
+    filter_categoria: Optional[str] = Field(
+        default=None,
+        description="Término parcial de la categoría/marca (ej: 'CISCO', 'FORTINET', 'SEGURIDAD')",
+    )
+    filter_persona: Optional[str] = Field(
+        default=None,
+        description="Nombre parcial de la persona",
+    )
+    filter_vencimiento: Optional[Literal["vigente", "vencida"]] = Field(
+        default=None,
+        description="Filtrar por estado de vencimiento",
+    )
+    group_by: Optional[Literal["persona", "certificacion", "categoria"]] = Field(
+        default=None,
+        description="Agrupar resultados por esta dimensión",
+    )

@@ -9,13 +9,13 @@
 <!-- Stepper -->
 <div class="d-flex align-items-center gap-2 mb-4">
     <span class="step-badge bg-success text-white"><i class="bi bi-check"></i></span>
-    <span class="text-muted">Subir PDF</span>
+    <a href="{% url 'analysis:new' %}" class="text-muted text-decoration-none">Subir PDF</a>
     <div class="flex-grow-1 border-top mx-2"></div>
     <span class="step-badge bg-success text-white"><i class="bi bi-check"></i></span>
-    <span class="text-muted">Extraer requisitos</span>
+    <a href="{% url 'analysis:step1' pk=session.pk %}" class="text-muted text-decoration-none">Extraer requisitos</a>
     <div class="flex-grow-1 border-top mx-2"></div>
     <span class="step-badge bg-success text-white"><i class="bi bi-check"></i></span>
-    <span class="text-muted">Validar y evaluar</span>
+    <a href="{% url 'analysis:step2' pk=session.pk %}" class="text-muted text-decoration-none">Validar y evaluar</a>
     <div class="flex-grow-1 border-top mx-2"></div>
     <span class="step-badge bg-success text-white"><i class="bi bi-check"></i></span>
     <span class="fw-semibold text-success">Resultados</span>
@@ -27,13 +27,35 @@
         <h4 class="mb-1">Resultados de Evaluacion</h4>
         <p class="text-muted mb-0">
             <i class="bi bi-file-earmark-pdf me-1 text-danger"></i>
-            <strong>{{ session.pdf_filename }}</strong>
+            <!-- Nombre editable inline -->
+            <span id="session-name-display">
+                <strong id="session-name-text">{{ session.display_name|default:session.pdf_filename }}</strong>
+                <button id="session-name-edit-btn" class="btn btn-link btn-sm p-0 ms-1 text-muted" title="Editar nombre" style="vertical-align: baseline;">
+                    <i class="bi bi-pencil" style="font-size:0.75rem;"></i>
+                </button>
+            </span>
+            <span id="session-name-form" class="d-none align-items-center gap-1">
+                <input id="session-name-input" type="text" class="form-control form-control-sm d-inline-block"
+                       style="width:280px;" maxlength="255"
+                       value="{{ session.display_name|default:session.pdf_filename }}">
+                <button id="session-name-save-btn" class="btn btn-success btn-sm px-2" title="Guardar">
+                    <i class="bi bi-check-lg"></i>
+                </button>
+                <button id="session-name-cancel-btn" class="btn btn-outline-secondary btn-sm px-2" title="Cancelar">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </span>
             &nbsp;&bull;&nbsp; Sesion #{{ session.pk }}
             &nbsp;&bull;&nbsp;
             <span class="text-muted small">{{ session.created_at|date:"d/m/Y H:i" }}</span>
         </p>
     </div>
     <div class="d-flex gap-2">
+        {% if session.pdf_filename %}
+        <a href="{% url 'analysis:download_pdf' pk=session.pk %}" class="btn btn-outline-danger btn-sm" title="{{ session.pdf_filename }}">
+            <i class="bi bi-file-earmark-pdf me-1"></i>Descargar PDF
+        </a>
+        {% endif %}
         <a href="{% url 'analysis:export_excel' pk=session.pk %}" class="btn btn-outline-success btn-sm">
             <i class="bi bi-file-earmark-spreadsheet me-1"></i>Descargar Excel
         </a>
@@ -450,4 +472,61 @@
     </a>
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    const renameUrl = "{% url 'analysis:rename' pk=session.pk %}";
+    const csrfToken = "{{ csrf_token }}";
+
+    const display  = document.getElementById('session-name-display');
+    const nameText = document.getElementById('session-name-text');
+    const editBtn  = document.getElementById('session-name-edit-btn');
+    const form     = document.getElementById('session-name-form');
+    const input    = document.getElementById('session-name-input');
+    const saveBtn  = document.getElementById('session-name-save-btn');
+    const cancelBtn= document.getElementById('session-name-cancel-btn');
+
+    function openEdit() {
+        display.classList.add('d-none');
+        form.classList.remove('d-none');
+        form.classList.add('d-inline-flex');
+        input.focus();
+        input.select();
+    }
+
+    function closeEdit() {
+        form.classList.add('d-none');
+        form.classList.remove('d-inline-flex');
+        display.classList.remove('d-none');
+    }
+
+    function save() {
+        const newName = input.value.trim();
+        fetch(renameUrl, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+            body: JSON.stringify({name: newName}),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                nameText.textContent = data.name;
+                input.value = data.name;
+            }
+            closeEdit();
+        })
+        .catch(() => closeEdit());
+    }
+
+    editBtn.addEventListener('click', openEdit);
+    saveBtn.addEventListener('click', save);
+    cancelBtn.addEventListener('click', closeEdit);
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') closeEdit();
+    });
+})();
+</script>
 {% endblock %}

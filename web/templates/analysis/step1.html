@@ -63,8 +63,14 @@
 
         <!-- Extraction buttons -->
         <div class="card border-0 shadow-sm mb-4">
-            <div class="card-header card-header-tendermod">
+            <div class="card-header card-header-tendermod d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-search me-2"></i>Extraccion de Requisitos del Pliego</h5>
+                <button class="btn btn-primary btn-sm"
+                        id="btn-extract-all"
+                        onclick="doExtractAll()"
+                        {% if session.status == 'ingesting_pdf' or session.status == 'created' %}disabled{% endif %}>
+                    <i class="bi bi-play-fill me-1"></i>Extraer todo
+                </button>
             </div>
             <div class="card-body">
                 <p class="text-muted small mb-3">
@@ -265,6 +271,7 @@ if ('{{ session.celery_task_id }}') {
             document.getElementById('btn-extract-indicators').disabled = false;
             document.getElementById('btn-extract-info').disabled = false;
             document.getElementById('btn-extract-general-req').disabled = false;
+            document.getElementById('btn-extract-all').disabled = false;
             pdfReady = true;
             if (result && result.ocr_applied) {
                 showOcrDownloadButton();
@@ -331,6 +338,41 @@ function doExtractGeneralRequirements() {
                 '<i class="bi bi-list-check me-1"></i>Re-extraer';
         }
     );
+}
+
+function doExtractAll() {
+    var btn = document.getElementById('btn-extract-all');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Extrayendo...';
+    var pending = 4;
+    function onDone() {
+        pending--;
+        if (pending === 0) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Extraer todo';
+        }
+    }
+    doExtractExperience();
+    doExtractIndicators();
+    doExtractGeneralInfo();
+    doExtractGeneralRequirements();
+    // Restore button when all 4 spinners finish (poll via interval)
+    var check = setInterval(function () {
+        var spinners = [
+            document.getElementById('spinner-experience'),
+            document.getElementById('spinner-indicators'),
+            document.getElementById('spinner-general-info'),
+            document.getElementById('spinner-general-req'),
+        ];
+        var allDone = spinners.every(function (s) {
+            return s && !s.querySelector('.spinner-border');
+        });
+        if (allDone) {
+            clearInterval(check);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Extraer todo';
+        }
+    }, 1500);
 }
 
 var experienceExtracted = {{ has_experience|yesno:'true,false' }};

@@ -25,3 +25,16 @@ class ExperienciaUploadForm(forms.Form):
         if not f.name.endswith('.xlsx'):
             raise forms.ValidationError('Solo se aceptan archivos .xlsx')
         return f
+
+
+class EquipoUploadForm(forms.Form):
+    archivo = forms.FileField(
+        label='Archivo CERTIFICACIONES_PERSONAL.xlsx',
+        help_text='Excel con personas y certificaciones del equipo de trabajo.',
+    )
+
+    def clean_archivo(self):
+        f = self.cleaned_data['archivo']
+        if not f.name.endswith('.xlsx'):
+            raise forms.ValidationError('Solo se aceptan archivos .xlsx')
+        return f

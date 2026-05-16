@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Evaluacion Equipo{% endblock %}
+{% block nav_team %}active{% endblock %}
+
+{% block content %}
+
+<div class="d-flex align-items-center gap-3 mb-4">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-people me-2 text-info"></i>Evaluacion de Equipo</h2>
+        <p class="text-muted mb-0">
+            Consulta en lenguaje natural sobre las personas y certificaciones de la empresa.
+            El agente consulta directamente la base de datos SQLite.
+        </p>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+
+        <!-- Pregunta -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header card-header-tendermod">
+                <h5 class="mb-0"><i class="bi bi-chat-dots me-2"></i>Consultar al agente</h5>
+            </div>
+            <div class="card-body">
+                <div class="input-group mb-2">
+                    <input type="text" id="team-question" class="form-control form-control-lg"
+                           placeholder="Ej: Cuantas personas tienen certificacion Cisco CCNA?"
+                           onkeydown="if(event.key==='Enter') doAsk()">
+                    <button class="btn btn-primary" id="btn-ask" onclick="doAsk()">
+                        <i class="bi bi-search me-1"></i>Consultar
+                    </button>
+                </div>
+
+                <!-- Spinner -->
+                <div id="qa-spinner" class="d-none text-center py-3">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="text-muted mt-2 small">El agente esta consultando la base de datos...</p>
+                </div>
+
+                <!-- Preguntas sugeridas -->
+                <div id="suggestions" class="mt-3">
+                    <p class="text-muted small mb-2">Ejemplos de preguntas:</p>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-outline-secondary btn-sm suggestion-chip"
+                                onclick="useSuggestion(this)">
+                            Cuantas personas tienen certificacion Cisco CCNA?
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm suggestion-chip"
+                                onclick="useSuggestion(this)">
+                            Quienes tienen el cargo de Project Manager?
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm suggestion-chip"
+                                onclick="useSuggestion(this)">
+                            Lista las certificaciones de seguridad informatica
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm suggestion-chip"
+                                onclick="useSuggestion(this)">
+                            Cuantas certificaciones vencen en 2025?
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm suggestion-chip"
+                                onclick="useSuggestion(this)">
+                            Que personas tienen mas de 5 certificaciones?
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm suggestion-chip"
+                                onclick="useSuggestion(this)">
+                            Lista todos los cargos distintos del equipo
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Historial de conversacion -->
+        <div id="chat-history"></div>
+
+    </div>
+
+    <!-- Panel lateral -->
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body">
+                <h6 class="card-title text-muted">
+                    <i class="bi bi-info-circle me-1"></i>Como funciona
+                </h6>
+                <ul class="small text-muted mb-0">
+                    <li class="mb-2">
+                        El agente traduce tu pregunta a SQL y consulta la base de datos de la empresa.
+                    </li>
+                    <li class="mb-2">
+                        Tablas disponibles: <code>personas</code> (nombre, cargo) y
+                        <code>certificaciones</code> (nombre, categoria, fecha, vencimiento).
+                    </li>
+                    <li>
+                        Si los datos no estan cargados, sube el Excel desde
+                        <a href="{% url 'redneet:dashboard' %}">Datos Empresa</a>.
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h6 class="card-title text-muted">
+                    <i class="bi bi-database me-1"></i>Estado de datos
+                </h6>
+                <div id="team-db-status" class="small text-muted">
+                    <div class="spinner-border spinner-border-sm me-1" role="status"></div>
+                    Consultando...
+                </div>
+                <div class="mt-2">
+                    <a href="{% url 'redneet:dashboard' %}" class="btn btn-outline-info btn-sm">
+                        <i class="bi bi-upload me-1"></i>Actualizar datos
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% csrf_token %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var QUERY_URL = "{% url 'analysis:team_qa_query' %}";
+var DB_STATUS_URL = "/api/db-status/";
+
+function getCsrfToken() {
+    var el = document.querySelector('[name=csrfmiddlewaretoken]');
+    return el ? el.value : '';
+}
+
+function useSuggestion(btn) {
+    document.getElementById('team-question').value = btn.textContent.trim();
+    doAsk();
+}
+
+function doAsk() {
+    var input = document.getElementById('team-question');
+    var question = input.value.trim();
+    if (!question) return;
+
+    var btn = document.getElementById('btn-ask');
+    btn.disabled = true;
+    input.disabled = true;
+    document.getElementById('qa-spinner').classList.remove('d-none');
+    document.getElementById('suggestions').classList.add('d-none');
+
+    fetch(QUERY_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCsrfToken(),
+        },
+        body: JSON.stringify({ question: question }),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        appendMessage(question, data.answer || data.error || 'Sin respuesta.', !!data.error);
+        input.value = '';
+    })
+    .catch(function(err) {
+        appendMessage(question, 'Error de conexion: ' + err, true);
+    })
+    .finally(function() {
+        btn.disabled = false;
+        input.disabled = false;
+        document.getElementById('qa-spinner').classList.add('d-none');
+        input.focus();
+    });
+}
+
+function appendMessage(question, answer, isError) {
+    var history = document.getElementById('chat-history');
+
+    var card = document.createElement('div');
+    card.className = 'card border-0 shadow-sm mb-3';
+
+    var body = document.createElement('div');
+    body.className = 'card-body';
+
+    var q = document.createElement('p');
+    q.className = 'fw-semibold mb-2';
+    q.innerHTML = '<i class="bi bi-question-circle me-1 text-primary"></i>' + escapeHtml(question);
+
+    var a = document.createElement('div');
+    a.className = isError ? 'alert alert-danger mb-0 small' : 'alert alert-light mb-0 small';
+    a.style.whiteSpace = 'pre-wrap';
+    a.textContent = answer;
+
+    body.appendChild(q);
+    body.appendChild(a);
+    card.appendChild(body);
+
+    history.insertBefore(card, history.firstChild);
+}
+
+function escapeHtml(text) {
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(text));
+    return d.innerHTML;
+}
+
+// Cargar estado de tablas de equipo
+fetch(DB_STATUS_URL)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        var el = document.getElementById('team-db-status');
+        var personas = data.personas || 0;
+        var certs = data.certificaciones || 0;
+        if (personas === 0 && certs === 0) {
+            el.innerHTML = '<span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>' +
+                'Sin datos. Cargue el Excel primero.</span>';
+        } else {
+            el.innerHTML = '<i class="bi bi-check-circle-fill text-success me-1"></i>' +
+                '<strong>' + personas + '</strong> personas &nbsp;|&nbsp; ' +
+                '<strong>' + certs + '</strong> certificaciones';
+        }
+    })
+    .catch(function() {
+        document.getElementById('team-db-status').textContent = 'No se pudo consultar el estado.';
+    });
+</script>
+{% endblock %}

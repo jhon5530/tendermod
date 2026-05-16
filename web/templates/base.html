@@ -128,6 +128,10 @@
                    href="{% url 'analysis:list' %}">
                     <i class="bi bi-list-ul me-1"></i>Historial
                 </a>
+                <a class="nav-link {% block nav_team %}{% endblock %}"
+                   href="{% url 'analysis:team_qa' %}">
+                    <i class="bi bi-people me-1"></i>Evaluacion Equipo
+                </a>
             </div>
         </nav>
 

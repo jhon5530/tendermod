@@ -53,14 +53,16 @@ def get_experience(user_input: str, k: int):
             exp_chapters = filter_relevant_chapters(chapters)
 
         if exp_chapters:
-            combined_text = ""
-            for ch in exp_chapters:
-                text = extract_page_range(pdf_path, ch["start_page"], ch["end_page"])
-                combined_text += f"\n\n=== {ch['title']} ===\n{text}"
-                if len(combined_text) > _MAX_EXPERIENCE_CHARS:
-                    logger.warning("[get_experience] Contexto truncado a %d chars", _MAX_EXPERIENCE_CHARS)
-                    combined_text = combined_text[:_MAX_EXPERIENCE_CHARS]
-                    break
+            first_page = exp_chapters[0]["start_page"]
+            last_page = exp_chapters[-1]["end_page"]
+            logger.info(
+                "[get_experience] Extrayendo rango continuo pág %d–%d (%d capítulos detectados)",
+                first_page + 1, last_page, len(exp_chapters),
+            )
+            combined_text = extract_page_range(pdf_path, first_page, last_page)
+            if len(combined_text) > _MAX_EXPERIENCE_CHARS:
+                logger.warning("[get_experience] Contexto truncado a %d chars", _MAX_EXPERIENCE_CHARS)
+                combined_text = combined_text[:_MAX_EXPERIENCE_CHARS]
 
             if combined_text.strip():
                 logger.info(

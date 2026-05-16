@@ -26,10 +26,27 @@ from tendermod.retrieval.vectorstore import read_vectorstore
 
 logger = logging.getLogger(__name__)
 
-# Límite de caracteres por bloque enviado al LLM (~90K tokens × 4 chars/token).
-_MAX_BLOCK_CHARS = 360_000
+# Límite de caracteres por bloque enviado al LLM.
+# 20K chars (~5K tokens) necesarios para que el modelo mantenga atención en sub-componentes
+# de puntaje (filas de tabla, criterios con puntaje propio) dentro de secciones largas.
+_MAX_BLOCK_CHARS = 20_000
 # Máximo de llamadas LLM concurrentes (respetar rate limits de OpenAI).
 _MAX_WORKERS = 5
+# Si los capítulos relevantes cubren menos del 60 % del PDF, añadir capítulos extra.
+_MIN_PAGE_COVERAGE = 0.60
+_MAX_EXTRA_CHAPTERS = 10
+
+# Keywords en el título del capítulo que indican que sus ítems son obligaciones
+# contractuales (no criterios de puntaje de oferta).
+_OBLIGATION_CHAPTER_KEYWORDS = [
+    "OBLIGACION", "CLAUSULA", "SUPERVISION", "SEGUIMIENTO",
+    "ANS", "EJECUCION DEL CONTRATO", "DEBER",
+]
+
+
+def _is_obligation_chapter(title: str) -> bool:
+    upper = title.upper()
+    return any(kw in upper for kw in _OBLIGATION_CHAPTER_KEYWORDS)
 
 
 def _get_pdf_path() -> str:
@@ -57,6 +74,23 @@ def get_general_requirements(k: int = 3) -> GeneralRequirementList:
     chapters = get_chapter_ranges(pdf_path, use_llm=True)
     relevant_chapters = filter_relevant_chapters(chapters)
 
+    # Safety net: si los capítulos relevantes cubren < 60 % del PDF, añadir más
+    n_pdf_pages = chapters[-1]["end_page"] if chapters else 1
+    covered_pages = sum(ch["end_page"] - ch["start_page"] for ch in relevant_chapters)
+    coverage = covered_pages / n_pdf_pages if n_pdf_pages > 0 else 1.0
+    logger.info(
+        "[get_general_requirements] Cobertura de páginas: %.0f%% (%d/%d capítulos seleccionados)",
+        coverage * 100, len(relevant_chapters), len(chapters),
+    )
+    if coverage < _MIN_PAGE_COVERAGE:
+        remaining = [ch for ch in chapters if ch not in relevant_chapters]
+        extra = remaining[:_MAX_EXTRA_CHAPTERS]
+        logger.warning(
+            "[get_general_requirements] Cobertura baja (%.0f%%) — añadiendo %d capítulos extra",
+            coverage * 100, len(extra),
+        )
+        relevant_chapters = relevant_chapters + extra
+
     if not relevant_chapters:
         logger.warning("[get_general_requirements] No se detectaron capítulos relevantes")
         return GeneralRequirementList(requisitos=[])
@@ -78,10 +112,11 @@ def get_general_requirements(k: int = 3) -> GeneralRequirementList:
             else [chapter_text]
         )
 
+        is_obligation = _is_obligation_chapter(title)
         results: list[GeneralRequirement] = []
         for block in sub_blocks:
             try:
-                partial = run_llm_requirements_from_chapter(block, title)
+                partial = run_llm_requirements_from_chapter(block, title, is_obligation=is_obligation)
                 results.extend(partial.requisitos)
             except Exception as exc:
                 logger.error(

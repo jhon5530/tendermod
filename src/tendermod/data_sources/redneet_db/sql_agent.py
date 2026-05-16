@@ -32,8 +32,19 @@ def build_company_sql_agent():
         db=db,
         agent_type="openai-tools",
         verbose=False,
+        top_k=500,
     )
 
     return db_agent
 
-    
+
+def build_team_sql_agent():
+    """SQL Agent focalizado en las tablas personas y certificaciones del equipo."""
+    llm = ChatOpenAI(temperature=0, model_name='gpt-4o-mini')
+    db_path = os.path.join(REDNEET_DB_PERSIST_DIR, "redneet_database.db")
+    db = SQLDatabase.from_uri(
+        f"sqlite:///{db_path}",
+        include_tables=["personas", "certificaciones"],
+        sample_rows_in_table_info=30,
+    )
+    return create_sql_agent(llm, db=db, agent_type="openai-tools", verbose=False, top_k=500)

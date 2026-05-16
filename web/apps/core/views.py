@@ -39,6 +39,8 @@ def db_status(request):
     counts = {
         'indicadores': 0,
         'experiencia': 0,
+        'personas': 0,
+        'certificaciones': 0,
         'db_exists': False,
         'error': None,
     }
@@ -64,6 +66,20 @@ def db_status(request):
                 counts['experiencia'] = cur.fetchone()[0]
             except sqlite3.OperationalError:
                 counts['experiencia'] = 0
+
+            # Table 'personas'
+            try:
+                cur.execute('SELECT COUNT(*) FROM personas')
+                counts['personas'] = cur.fetchone()[0]
+            except sqlite3.OperationalError:
+                counts['personas'] = 0
+
+            # Table 'certificaciones'
+            try:
+                cur.execute('SELECT COUNT(*) FROM certificaciones')
+                counts['certificaciones'] = cur.fetchone()[0]
+            except sqlite3.OperationalError:
+                counts['certificaciones'] = 0
 
         counts['db_exists'] = True
     except Exception as exc:

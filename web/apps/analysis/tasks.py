@@ -128,11 +128,11 @@ def extract_indicators_task(self, session_id):
         session.save(update_fields=['celery_task_id', 'updated_at'])
 
         query = (
-            'Cuales son los indicadores financieros como: '
-            'Rentabilidades, capacidades, endeudamiento, indices'
+            'Indicadores de capacidad financiera requeridos: '
+            'liquidez, endeudamiento, razon de cobertura de intereses, capital de trabajo'
         )
         logger.info('Extrayendo indicadores para sesion %s', session_id)
-        ind_response, indicators_context = get_indicators(user_input=query, k=2)
+        ind_response, indicators_context = get_indicators(user_input=query, k=5)
         connection.close()
 
         if ind_response is None:

@@ -31,13 +31,17 @@ CRITICAL RULES for the "valor" field:
 - NEVER return just a number. "1.13" alone is WRONG. "Mayor o igual a 1.13" is CORRECT.
 - Use a dot (.) as the decimal separator in the output, even if the source uses a comma.
 
-Return the result ONLY as JSON matching this exact schema:
+CRITICAL: Extract ONLY the indicators and values that appear explicitly in the context provided.
+Do NOT invent, assume, or reuse any values from these instructions. If the context does not
+mention a specific indicator or value, do not include it in the output.
+
+Return the result ONLY as JSON matching this exact schema (the names and values below are
+FORMAT PLACEHOLDERS — replace them entirely with what you find in the context):
 
 {
   "answer": [
-    {"indicador": "Índice de Liquidez", "valor": "Mayor o igual a 1.13"},
-    {"indicador": "Nivel de Endeudamiento", "valor": "Menor o igual a 0.84"},
-    {"indicador": "Razón de cobertura de intereses", "valor": "Mayor o igual a 1.00"}
+    {"indicador": "<nombre exacto del indicador según el pliego>", "valor": "<condicion y valor según el pliego>"},
+    {"indicador": "<nombre exacto del indicador según el pliego>", "valor": "<condicion y valor según el pliego>"}
   ]
 }
 """
@@ -159,9 +163,15 @@ The agent must answer the following questions based on the contextual informatio
    Never omit the unit. Never confuse "100% del presupuesto expresado en SMMLV" with "100 SMMLV" — the former is a percentage, the latter is a fixed amount.
 6- Does the tender explicitly require that the bidder must have experience in ALL of the listed UNSPSC codes simultaneously in a single contract? Answer ONLY "ALL" if the pliego explicitly states that all codes must be present together. In all other cases, answer "AT_LEAST_ONE".
 7- Does the tender explicitly require that the experience must be related to or in the same area as the object/purpose of this specific contracting process?
-   Answer "SI" ONLY if the pliego uses phrases like "experiencia relacionada con el objeto", "experiencia en actividades similares al objeto del contrato", or explicitly links experience requirements to the purpose/object of this process.
-   Answer "NO" if the pliego explicitly states that experience is not restricted by the object or purpose.
-   Answer "NO_ESPECIFICADO" in all other cases (object is mentioned but not linked to experience requirements, or no information available).
+   Answer "SI" ONLY if the pliego contains an EXPLICIT phrase directly linking experience to the contract object, such as:
+   "experiencia relacionada con el objeto", "experiencia en actividades similares al objeto del contrato",
+   "la experiencia deberá guardar relación con el objeto", "contratos relacionados con el objeto del proceso", or equivalent.
+   Answer "NO_ESPECIFICADO" in ALL other cases, including:
+   - The pliego specifies UNSPSC codes — codes CLASSIFY the service, they do NOT impose experience relevance.
+   - The pliego describes what the contract is about (its object/scope) without explicitly tying that to experience requirements.
+   - The section title mentions the contract topic but does not explicitly restrict what the experience must cover.
+   - No clear explicit statement connecting experience to the object exists.
+   Answer "NO" ONLY if the pliego explicitly states experience is NOT restricted by the object or purpose.
 
 8- Does the tender list MULTIPLE INDEPENDENT experience sub-requirements, where each must be
    satisfied by at least ONE SEPARATE contract? Look for ANY of these patterns:
@@ -172,6 +182,13 @@ The agent must answer the following questions based on the contextual informatio
      de Infraestructura: mínimo 6.000 SMMLV en contratos relacionados con NGFW; IPS/IDS..."
      In this case EACH SEGMENT IS A SEPARATE SUB-REQUISITO with its own valor_minimo.
    Answer "MULTI_CONDICION" if any such pattern exists. Answer "GLOBAL" in all other cases.
+
+   IMPORTANT — these are NOT MULTI_CONDICION:
+   - If the pliego requires N contracts (N > 1) ALL with THE SAME codes or THE SAME type of activity,
+     answer "GLOBAL" with "Cantidad de contratos" = N. Do NOT create sub-requisitos for this.
+     Example: "Al menos 4 contratos ejecutados que incluyan los códigos UNSPSC 81111800 y 81112300"
+     → GLOBAL, "Cantidad de contratos" = "4", NOT MULTI_CONDICION.
+   - MULTI_CONDICION requires at least 2 sub-requirements describing DIFFERENT activities or technologies.
 
 9- If you answered "MULTI_CONDICION" in question 8, extract each sub-requirement as a
    separate entry in "Sub requisitos". For each sub-requirement provide:
@@ -328,26 +345,35 @@ Eres un asistente especializado en contratación pública colombiana.
 Tu tarea es extraer TODOS los requerimientos del pliego de condiciones del contexto proporcionado:
 habilitantes, causales de rechazo, garantías, criterios de evaluación/ponderación y documentales.
 
-EXCLUYE únicamente:
-- Indicadores financieros de ratio (liquidez, endeudamiento, rentabilidad, ROCE, ROE, ROA) — ya se procesan por separado.
+Extrae TODOS los requerimientos sin excepción, incluyendo indicadores financieros de ratio.
 
 == CATEGORÍAS ==
+- EXPERIENCIA    : requisitos de acreditación de experiencia del proponente: contratos previos,
+                   objetos requeridos, valores mínimos de contratos, códigos UNSPSC, años de
+                   experiencia, secciones tituladas "experiencia general", "experiencia específica",
+                   "documentos para acreditar la experiencia". USA ESTA CATEGORÍA para TODO lo
+                   relacionado con experiencia, no uses TECNICO ni CAPACIDAD para estos ítems.
 - JURIDICO       : RUP, cámara de comercio, certificados tributarios, antecedentes disciplinarios/judiciales/fiscales
-- TECNICO        : certificaciones ISO, acreditaciones técnicas, equipos, software, normas técnicas
+- TECNICO        : certificaciones ISO, acreditaciones técnicas, equipos, software, normas técnicas (NO experiencia)
 - DOCUMENTACION  : formularios del pliego, cartas de presentación, paz y salvos, formatos
-- CAPACIDAD      : personal mínimo, directores, estructura organizacional, oficinas
-- FINANCIERO_OTRO: patrimonio líquido mínimo, capital de trabajo (monto fijo, no ratio)
+- CAPACIDAD      : personal mínimo, directores, estructura organizacional, oficinas (NO experiencia)
+- FINANCIERO_OTRO: indicadores financieros de ratio (liquidez, endeudamiento, cobertura de intereses,
+                   rentabilidad, ROCE, ROE, ROA) Y montos fijos (patrimonio líquido mínimo, capital
+                   de trabajo). Usa esta categoría para TODO lo financiero que no sea experiencia.
 - GARANTIA       : pólizas (seriedad, cumplimiento, estabilidad, responsabilidad civil, etc.)
 - CAUSAL_RECHAZO : condiciones explícitas de rechazo de oferta (sección 2.x en AMPs)
 - EVALUACION     : criterios de puntaje (técnicos, económicos, industria nacional, MiPymes)
 - OTRO           : cualquier otro requerimiento no clasificable en las anteriores
 
 == TIPOS ==
-- HABILITANTE-EXPERIENCIA: requisito de experiencia (acreditación de contratos, UNSPSC, objetos
+- HABILITANTE-EXPERIENCIA : requisito de experiencia (acreditación de contratos, UNSPSC, objetos
   de contratos previos, años de experiencia, valor mínimo de contratos). USA ESTE TIPO siempre
   que el ítem sea de experiencia, aunque no mencione UNSPSC explícitamente.
-- HABILITANTE    : cumple/no-cumple; oferta inhabilitada si no lo tiene (no relacionado con experiencia)
-- PUNTUABLE      : otorga puntaje; la oferta no se rechaza por no tenerlo
+- HABILITANTE-INDICADORES: indicador financiero de ratio exigido como habilitante (liquidez,
+  endeudamiento, cobertura de intereses, rentabilidad, ROCE, ROE, ROA, capital de trabajo como
+  ratio, patrimonio líquido). USA ESTE TIPO para TODO indicador financiero cuantitativo con umbral.
+- HABILITANTE    : cumple/no-cumple; oferta inhabilitada si no lo tiene (no relacionado con experiencia ni indicadores)
+- PUNTUABLE      : otorga puntaje en la EVALUACIÓN DE LA OFERTA (pre-adjudicación); la oferta no se rechaza por no tenerlo. NO incluir métricas de supervisión, ANS ni desempeño contractual post-adjudicación.
 - DOCUMENTAL     : formulario o formato que debe acompañar la oferta
 - GARANTIA       : póliza o garantía exigida
 - CAUSAL_RECHAZO : condición que genera rechazo automático de la propuesta
@@ -364,13 +390,19 @@ EXCLUYE únicamente:
 2) TIPO vs CATEGORÍA:
    - Un ítem de EXPERIENCIA (menciona contratos previos, años de experiencia, acreditación de
      experiencia, UNSPSC, "experiencia general", "experiencia específica", "acreditar", "certificar
-     experiencia"): tipo="HABILITANTE-EXPERIENCIA", categoria="TECNICO" (o "CAPACIDAD" si aplica).
+     experiencia"): categoria="EXPERIENCIA", tipo="HABILITANTE-EXPERIENCIA".
+   - Un ítem de INDICADOR FINANCIERO (ratio con umbral numérico: liquidez >= X, endeudamiento
+     <= X, cobertura >= X, rentabilidad, ROCE, ROE, ROA, patrimonio líquido, capital de trabajo
+     expresado como ratio): categoria="FINANCIERO_OTRO", tipo="HABILITANTE-INDICADORES".
    - Un ítem CAUSAL_RECHAZO: categoria="CAUSAL_RECHAZO", tipo="CAUSAL_RECHAZO".
    - Un ítem de puntaje (contiene "puntos", "puntaje", "máximo X puntos"): tipo="PUNTUABLE",
      categoria="EVALUACION" (o "TECNICO" si es criterio técnico puntuable).
    - Un formulario (contiene "FORMATO No.", "Anexo No.", "Formulario No."): tipo="DOCUMENTAL",
      categoria="DOCUMENTACION".
    - Una póliza: categoria="GARANTIA", tipo="GARANTIA".
+   - OBLIGACIONES / SUPERVISIÓN: si la pregunta contiene la nota "OBLIGACIONES DEL
+     CONTRATISTA o SUPERVISIÓN", todos los ítems de ese bloque son tipo="OTRO",
+     NUNCA "PUNTUABLE".
 
 3) DOCUMENTO/FORMATO:
    - Si el requisito menciona "FORMATO No. X", "ANEXO No. X", "FORMULARIO No. X", pon ese
@@ -380,11 +412,13 @@ EXCLUYE únicamente:
 4) GRANULARIDAD:
    - Cada ítem numerado (2.23.1, 4.1.1.1, 5.1.3, 7.2.1, …) es UN ítem separado.
    - Si una sección define múltiples condiciones o perfiles numerados, cada uno es un ítem.
-   - CRITERIOS DE PUNTAJE: si dentro de una sección PUNTUABLE hay múltiples componentes que
-     tienen puntaje propio asignado (sea en tabla o en lista), cada componente es un ítem
-     PUNTUABLE independiente. Usa la misma "seccion" del padre para todos.
-     Ejemplo: si 4.2.2.1 asigna 4 pts al "Plan de Aseguramiento" y 6 pts a "Certificaciones ISO",
-     crea dos ítems con seccion="4.2.2.1", uno por cada componente con su puntaje.
+   - CRITERIOS DE PUNTAJE: si dentro de una sección PUNTUABLE hay múltiples componentes donde
+     cada uno tiene su valor de puntos asignado EXPLÍCITAMENTE (número + "puntos"/"pts" junto
+     al componente, en la misma fila o línea), extrae cada componente como ítem PUNTUABLE
+     independiente con la misma "seccion" del padre.
+     Ejemplo válido: tabla con "Plan de Aseguramiento: 4 pts" y "Certificaciones ISO: 6 pts"
+     → dos ítems seccion="4.2.2.1".
+     NO aplica a listas de obligaciones generales sin valor de puntaje asignado por ítem.
 
 5) COMPLETITUD Y DEDUPLICACIÓN:
    - Revisa el contexto completo antes de responder.
@@ -475,3 +509,53 @@ Primeras páginas del pliego (donde suele estar el índice/tabla de contenido):
 {pages_text}
 
 Identifica todos los capítulos y secciones con sus rangos de página."""
+
+# ── Prompts: Evaluación Equipo ────────────────────────────────────────────────
+
+TEAM_INTENT_SYSTEM = """Eres un parser de intenciones para consultas sobre el equipo técnico de una empresa de TI.
+
+La base de datos tiene dos tablas:
+- personas(Persona, Cargo): lista del equipo (30 filas)
+- certificaciones(Persona, Cargo, Categoria, Certificacion, Descripcion, Fecha_Expedicion, Fecha_Expiracion, Vencimiento): certificaciones del equipo (350 filas)
+
+Valores reales de la columna Categoria:
+PROFESION, ACRONIS, ALLIED TELESIS, CABLEADO, CERTIFICACIONES OTRAS MARCAS,
+CISCO- MERAKI, CURSOS BASICOS, FORTINET, GENERALES- LICITACIONES, HPE-ARUBA,
+HUAWEI, IPV6- LACNIC, SEGURIDAD
+
+Ejemplos de valores en la columna Certificacion:
+"Cisco CCNA- Cisco Certified Network Associate"
+"Cisco CCNP- Cisco Certified Network Professional Enterprise"
+"Crowdstrike Technical Sales Accreditation"
+"Crowdstrike Falcon 101- Falcon Platform Technical Fundamentals"
+"Fortinet NSE 4- Network Security Professional"
+"HPE Sales Certified - Networking Solutions"
+
+Reglas de parseo:
+- Cuando la pregunta mencione una certificación específica (CCNA, CCNP, Crowdstrike, Fortinet, Aruba, NSE, etc.),
+  pon ese término en filter_cert. Se buscará con LIKE '%term%' en la columna Certificacion.
+- Cuando la pregunta mencione una marca o categoría general (Cisco, HPE, Huawei, seguridad, cableado),
+  pon el término en filter_categoria. Se buscará con LIKE en la columna Categoria.
+- Si la pregunta pide "cuántos", "número de", usa action="count".
+- Si la pregunta pide nombres, lista, "quiénes", usa action="list".
+- Si la pregunta pide fechas, detalles, "información de", usa action="detail".
+- Si la pregunta menciona "vigentes", setea filter_vencimiento="vigente".
+- Si la pregunta menciona "vencidas" o "vencidas", setea filter_vencimiento="vencida".
+- Si la pregunta pide agrupar por persona (ej: "cuántas certificaciones tiene cada persona"), group_by="persona".
+- Si la pregunta pide agrupar por tipo de cert, group_by="certificacion".
+
+Retorna SOLO JSON válido con el schema TeamQuery. Sin explicaciones. Sin markdown."""
+
+TEAM_INTENT_USER = "Pregunta: {question}"
+
+TEAM_ANSWER_SYSTEM = """Eres un asistente que responde preguntas sobre el equipo técnico de una empresa.
+Responde en español, de forma concisa y directa. Usa listas cuando haya múltiples ítems.
+Si los resultados están vacíos, dilo claramente y sugiere que puede que la búsqueda sea muy específica.
+Nunca inventes datos que no estén en los resultados proporcionados."""
+
+TEAM_ANSWER_USER = """Pregunta: {question}
+
+Resultados de la consulta SQL:
+{results}
+
+Responde la pregunta basándote exclusivamente en estos resultados."""

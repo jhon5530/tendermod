@@ -19,5 +19,9 @@ urlpatterns = [
     path('<int:pk>/checklist/save/', views.analysis_checklist_save, name='checklist_save'),
     path('<int:pk>/pliego/qa/', views.analysis_pliego_qa, name='pliego_qa'),
     path('<int:pk>/download-ocr/', views.download_ocr, name='download_ocr'),
+    path('<int:pk>/download-pdf/', views.download_pdf, name='download_pdf'),
+    path('<int:pk>/rename/', views.session_rename, name='rename'),
     path('<int:pk>/delete/', views.analysis_delete, name='delete'),
+    path('team/', views.team_qa, name='team_qa'),
+    path('team/query/', views.team_qa_query, name='team_qa_query'),
 ]

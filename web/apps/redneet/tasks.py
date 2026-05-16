@@ -42,3 +42,20 @@ def load_experiencia_task(self):
     except Exception as exc:
         logger.error('Error cargando experiencia: %s', exc)
         raise self.retry(exc=exc, countdown=5, max_retries=1)
+
+
+@shared_task(bind=True, name='redneet.load_team_task')
+def load_team_task(self):
+    """
+    Carga certificaciones_personal.xlsx a las tablas personas y certificaciones en SQLite.
+    El archivo debe haber sido copiado a TENDERMOD_DB_DIR/certificaciones_personal.xlsx.
+    """
+    connection.close()
+    try:
+        from tendermod.data_sources.redneet_db.team_loader import load_team_db
+        load_team_db('certificaciones_personal.xlsx')
+        logger.info('Tablas personas/certificaciones cargadas exitosamente')
+        return {'status': 'ok', 'message': 'Datos del equipo cargados correctamente'}
+    except Exception as exc:
+        logger.error('Error cargando datos del equipo: %s', exc)
+        raise self.retry(exc=exc, countdown=5, max_retries=1)

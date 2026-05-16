@@ -98,7 +98,11 @@ def run_llm_general_requirements(context: str, query: str) -> GeneralRequirement
     return structured_llm.invoke(messages)
 
 
-def run_llm_requirements_from_chapter(chapter_text: str, chapter_title: str) -> GeneralRequirementList:
+def run_llm_requirements_from_chapter(
+    chapter_text: str,
+    chapter_title: str,
+    is_obligation: bool = False,
+) -> GeneralRequirementList:
     """Extrae requerimientos del texto completo de un capítulo del pliego."""
     from tendermod.evaluation.prompts import (
         qna_system_message_general_requirements,
@@ -106,10 +110,18 @@ def run_llm_requirements_from_chapter(chapter_text: str, chapter_title: str) -> 
     )
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     structured_llm = llm.with_structured_output(GeneralRequirementList)
+    question_str = f"requerimientos en el capítulo: {chapter_title}"
+    if is_obligation:
+        question_str += (
+            "\n\n⚠️ NOTA CRÍTICA: Este bloque pertenece a un capítulo de OBLIGACIONES DEL "
+            "CONTRATISTA o SUPERVISIÓN (ejecución contractual). Por defecto todos sus ítems "
+            "son tipo='OTRO'. NUNCA uses tipo='PUNTUABLE' salvo que el texto del ítem incluya "
+            "explícitamente un número de puntos asignado a ese ítem (ej. '4 puntos', 'hasta 10 pts')."
+        )
     user_content = (
         qna_user_message_general_requirements
         .replace("{context}", chapter_text)
-        .replace("{question}", f"requerimientos en el capítulo: {chapter_title}")
+        .replace("{question}", question_str)
     )
     messages = [
         SystemMessage(content=qna_system_message_general_requirements),

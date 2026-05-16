@@ -670,8 +670,19 @@ def check_multi_condition_experience(
 
         if vectorstore is not None:
             try:
+                # Combinar objeto global + descripción del sub-req para mejorar
+                # la similitud semántica cuando descripcion contiene lenguaje
+                # de requisito legal (códigos UNSPSC, "Al menos N contratos...")
+                # en lugar de descripción de actividad. Para sub-reqs con descripción
+                # propia (FNA: "instalación de UPS en Datacenter"), objeto añade
+                # contexto sin quitar especificidad.
+                objeto_global = (tender_experience.objeto or "").strip()
+                if objeto_global and objeto_global not in ("None", ""):
+                    semantic_query = f"{objeto_global} {sub.descripcion}".strip()
+                else:
+                    semantic_query = sub.descripcion
                 results = vectorstore.similarity_search_with_relevance_scores(
-                    sub.descripcion, k=k_dinamico
+                    semantic_query, k=k_dinamico
                 )
                 for doc, score in results:
                     raw_key = doc.metadata.get("numero_rup")

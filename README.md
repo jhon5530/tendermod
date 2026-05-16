@@ -22,12 +22,26 @@ Actividades ejecutadas
  - Creacion de interfaz grafica
 - (08-04-26)  Se realizo ajuste de subrequisitos para evaluar experiencias especificas puntuales
 - (01-05-26)  Ajustes a extraccion, afinamiento de extraccion y de resultados en Excel.
-
-
+- (09-05-26) Se realizo correccion de errores de extraccion, se cargaron perfiles, se creo un modulo de evaluacion de equipo (manual tipo Chatbot) y se genero un prompt de auditoria, tambien se genero un archivo de arquitectura con Cowork para mejorar la extraccion y que sea mas parecida a lo que es Claude Cowork, pero no se ha evaluado ni implementado
+- (10-05-26) Se incio proceso de validacion de auditoria pero se encuentra:
+   - Gran parte de la informacion encontrada no es relevante.
+   - Falta orden en los capitulos.
+   - Si es informacion util para generar un resumen de los requerimientos.
+   - La informacion de Experiencia e indicadores es muy relevante y se encuentra organizada (ANE)
+   - Mejoras:
+      - Plantear una organizacion de los capitulos y/o extratos relevantes para temas particulares, (Ej. Equipo de trabajo)
+      - Para estos temas particulares hacer un nuevo flujo de extraccion de informacion literal (no LLM,extraccion pura de Texto), con el fin de organizar un documento expecifico de este requerimiento y sobre esto por medio de un LLM organizar en un schema especifico los requerimientos de personal, por perfil identificar:
+         - Tipo de perfil
+         - Cantidad
+         - Experiencia laboral requerida:
+            - Años
+            - Tipo de requerimiento.
+         - Estudios academicos (rama de la ingenieria, especializacion, si es o no Afin)
+         - Certificaciones
+         - Requerimiento literal
 Proximos pasos
-- Validar Fase 2 (Evaluacion):
-   - Usar informacion de experiencia para evaluar experiencia
-   - Complementar base de datos con informacion de certificaciones y demas requerimientos.
+- Validar la auditoria y en base a esto realizar mejoras a la extraccion.
+- Mejorar la evaluacion del equipo de trabajo y adicionar un modulo de extraccion de equipo basado en los requisitos generales para evaluar el equipo.
    
 - Validar Fase 3 (Cargar mas archivos):
    - Generar una version 1 de una interfaz grafica que permita:
