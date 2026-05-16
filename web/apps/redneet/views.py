@@ -5,6 +5,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.contrib import messages
+from django.http import FileResponse, Http404
 from django.shortcuts import render, redirect
 from django.views.decorators.http import require_POST
 
@@ -197,6 +198,26 @@ def clear_equipo(request):
         logger.error("[clear_equipo] Error: %s", exc)
         messages.error(request, f"Error al borrar datos del equipo: {exc}")
     return redirect("redneet:dashboard")
+
+
+def download_excel(request, file_type):
+    FILE_MAP = {
+        'indicadores': ('rib.xlsx', 'rib.xlsx'),
+        'experiencia': ('experiencia_rup.xlsx', 'experiencia_rup.xlsx'),
+        'equipo': ('certificaciones_personal.xlsx', 'CERTIFICACIONES_PERSONAL.xlsx'),
+    }
+    if file_type not in FILE_MAP:
+        raise Http404
+    stored_name, download_name = FILE_MAP[file_type]
+    file_path = settings.TENDERMOD_DB_DIR / stored_name
+    if not file_path.exists():
+        raise Http404
+    return FileResponse(
+        open(file_path, 'rb'),
+        as_attachment=True,
+        filename=download_name,
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
 
 
 def system_settings(request):

@@ -104,6 +104,10 @@
                         <button type="submit" class="btn btn-primary">
                             <i class="bi bi-upload me-1"></i>Cargar indicadores
                         </button>
+                        <a href="{% url 'redneet:download_excel' file_type='indicadores' %}"
+                           class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-download me-1"></i>Descargar
+                        </a>
                         <button type="button" class="btn btn-outline-danger btn-sm"
                                 onclick="confirmClear('{% url 'redneet:clear_indicadores' %}', 'Indicadores Financieros', 'Se vaciará la tabla indicadores y se eliminará el archivo rib.xlsx.')">
                             <i class="bi bi-trash me-1"></i>Borrar datos
@@ -156,6 +160,10 @@
                         <button type="submit" class="btn btn-success">
                             <i class="bi bi-upload me-1"></i>Cargar experiencia
                         </button>
+                        <a href="{% url 'redneet:download_excel' file_type='experiencia' %}"
+                           class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-download me-1"></i>Descargar
+                        </a>
                         <button type="button" class="btn btn-outline-danger btn-sm"
                                 onclick="confirmClear('{% url 'redneet:clear_experiencia' %}', 'Experiencia RUP', 'Se vaciará la tabla experiencia en SQLite y se eliminará el índice ChromaDB de experiencia.')">
                             <i class="bi bi-trash me-1"></i>Borrar datos
@@ -209,6 +217,10 @@
                         <button type="submit" class="btn btn-info text-white">
                             <i class="bi bi-upload me-1"></i>Cargar equipo
                         </button>
+                        <a href="{% url 'redneet:download_excel' file_type='equipo' %}"
+                           class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-download me-1"></i>Descargar
+                        </a>
                         <button type="button" class="btn btn-outline-danger btn-sm"
                                 onclick="confirmClear('{% url 'redneet:clear_equipo' %}', 'Equipo de Trabajo', 'Se vaciarán las tablas personas y certificaciones.')">
                             <i class="bi bi-trash me-1"></i>Borrar datos

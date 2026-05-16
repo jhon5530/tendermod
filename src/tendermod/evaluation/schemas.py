@@ -119,6 +119,7 @@ class GeneralRequirement(BaseModel):
         "CAUSAL_RECHAZO",
         "EVALUACION",
         "EXPERIENCIA",
+        "IDIOMA",
         "OTRO",
     ]
     tipo: Literal[
@@ -129,6 +130,8 @@ class GeneralRequirement(BaseModel):
         "DOCUMENTAL",
         "GARANTIA",
         "CAUSAL_RECHAZO",
+        "OBLIGACION",
+        "IDIOMA",
         "NO_ESPECIFICADO",
     ] = "NO_ESPECIFICADO"
     descripcion: str
@@ -136,7 +139,14 @@ class GeneralRequirement(BaseModel):
     obligatorio: Literal["SI", "NO", "NO_ESPECIFICADO"] = "SI"
     pagina: str = "N/A"
     seccion: str = "N/A"
-    estado: Literal["PENDIENTE", "CUMPLE", "NO_CUMPLE", "N/A"] = "PENDIENTE"
+    estado: Literal[
+        "PENDIENTE",      # legacy — sesiones anteriores; UI lo trata como EN_REVISION
+        "EN_REVISION",
+        "CUMPLE",
+        "NO_CUMPLE",
+        "N/A",
+    ] = "EN_REVISION"
+    nota: str = ""
     origen: Literal["EXTRACCION", "QA", "MANUAL"] = "EXTRACCION"
     extracto_pliego: str = ""
 
@@ -233,6 +243,14 @@ class TeamQuery(BaseModel):
     filter_persona: Optional[str] = Field(
         default=None,
         description="Nombre parcial de la persona",
+    )
+    filter_cert_list: Optional[List[str]] = Field(
+        default=None,
+        description="Lista de términos de certificación cuando se requieren MÚLTIPLES con lógica AND. Ej: ['CCNA', 'ITIL']",
+    )
+    filter_categoria_list: Optional[List[str]] = Field(
+        default=None,
+        description="Lista de categorías cuando se requieren MÚLTIPLES con lógica AND. Ej: ['CISCO', 'FORTINET']",
     )
     filter_vencimiento: Optional[Literal["vigente", "vencida"]] = Field(
         default=None,

@@ -10,6 +10,9 @@ urlpatterns = [
     path('quick/evaluate/', views.analysis_quick_evaluate, name='quick_evaluate'),
     path('<int:pk>/step1/', views.analysis_step1, name='step1'),
     path('<int:pk>/step1/extract/', views.analysis_extract, name='extract'),
+    path('<int:pk>/auto/', views.analysis_auto, name='analysis_auto'),
+    path('<int:pk>/auto/evaluate-experience/', views.auto_evaluate_experience, name='auto_evaluate_experience'),
+    path('<int:pk>/auto/evaluate-indicators/', views.auto_evaluate_indicators, name='auto_evaluate_indicators'),
     path('<int:pk>/step2/', views.analysis_step2, name='step2'),
     path('<int:pk>/step2/evaluate/', views.analysis_evaluate, name='evaluate'),
     path('<int:pk>/results/', views.analysis_results, name='results'),
@@ -24,4 +27,5 @@ urlpatterns = [
     path('<int:pk>/delete/', views.analysis_delete, name='delete'),
     path('team/', views.team_qa, name='team_qa'),
     path('team/query/', views.team_qa_query, name='team_qa_query'),
+    path('team/clear/', views.team_qa_clear, name='team_qa_clear'),
 ]

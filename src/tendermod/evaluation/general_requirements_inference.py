@@ -2,6 +2,8 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+import fitz
+
 from tendermod.config.settings import CHROMA_PERSIST_DIR
 from tendermod.evaluation.llm_client import (
     run_llm_requirements_from_chapter,
@@ -36,17 +38,27 @@ _MAX_WORKERS = 5
 _MIN_PAGE_COVERAGE = 0.60
 _MAX_EXTRA_CHAPTERS = 10
 
-# Keywords en el título del capítulo que indican que sus ítems son obligaciones
-# contractuales (no criterios de puntaje de oferta).
+# Keywords en el título del capítulo que indican obligaciones contractuales post-adjudicación.
 _OBLIGATION_CHAPTER_KEYWORDS = [
     "OBLIGACION", "CLAUSULA", "SUPERVISION", "SEGUIMIENTO",
     "ANS", "EJECUCION DEL CONTRATO", "DEBER",
+    "OBLIGACIONES ESPECIALES", "OBLIGACIONES GENERALES", "COMPROMISOS",
+]
+
+# Keywords en el título del capítulo que indican requisitos de idioma/lenguaje de la oferta.
+_LANGUAGE_CHAPTER_KEYWORDS = [
+    "IDIOMA", "LENGUAJE", "LANGUAGE", "LINGUA",
 ]
 
 
 def _is_obligation_chapter(title: str) -> bool:
     upper = title.upper()
     return any(kw in upper for kw in _OBLIGATION_CHAPTER_KEYWORDS)
+
+
+def _is_language_chapter(title: str) -> bool:
+    upper = title.upper()
+    return any(kw in upper for kw in _LANGUAGE_CHAPTER_KEYWORDS)
 
 
 def _get_pdf_path() -> str:
@@ -75,7 +87,12 @@ def get_general_requirements(k: int = 3) -> GeneralRequirementList:
     relevant_chapters = filter_relevant_chapters(chapters)
 
     # Safety net: si los capítulos relevantes cubren < 60 % del PDF, añadir más
-    n_pdf_pages = chapters[-1]["end_page"] if chapters else 1
+    # Usar el conteo real de páginas del PDF, no el end_page del último capítulo detectado
+    # (el LLM sólo escanea las primeras 25 páginas, por lo que chapters puede terminar
+    # mucho antes del final del documento).
+    _doc = fitz.open(pdf_path)
+    n_pdf_pages = len(_doc)
+    _doc.close()
     covered_pages = sum(ch["end_page"] - ch["start_page"] for ch in relevant_chapters)
     coverage = covered_pages / n_pdf_pages if n_pdf_pages > 0 else 1.0
     logger.info(
@@ -113,6 +130,7 @@ def get_general_requirements(k: int = 3) -> GeneralRequirementList:
         )
 
         is_obligation = _is_obligation_chapter(title)
+        is_language = _is_language_chapter(title)
         results: list[GeneralRequirement] = []
         for block in sub_blocks:
             try:
@@ -122,8 +140,18 @@ def get_general_requirements(k: int = 3) -> GeneralRequirementList:
                 logger.error(
                     "[get_general_requirements] Error en capítulo '%s': %s", title, exc
                 )
+        # Override determinístico: forzar tipo según el capítulo, sin depender del LLM.
+        if is_obligation:
+            for req in results:
+                req.tipo = "OBLIGACION"
+        elif is_language:
+            for req in results:
+                req.tipo = "IDIOMA"
+                req.categoria = "IDIOMA"
+
         logger.info(
-            "[get_general_requirements] '%s': %d requerimientos extraídos", title, len(results)
+            "[get_general_requirements] '%s': %d requerimientos extraídos (obligation=%s, language=%s)",
+            title, len(results), is_obligation, is_language,
         )
         return results
 

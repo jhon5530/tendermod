@@ -12,4 +12,5 @@ urlpatterns = [
     path('clear-experiencia/', views.clear_experiencia, name='clear_experiencia'),
     path('clear-equipo/', views.clear_equipo, name='clear_equipo'),
     path('settings/', views.system_settings, name='settings'),
+    path('download-excel/<str:file_type>/', views.download_excel, name='download_excel'),
 ]

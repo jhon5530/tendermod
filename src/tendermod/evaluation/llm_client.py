@@ -13,7 +13,7 @@ from tendermod.evaluation.prompts import basic_comparation_system_prompt, basic_
 from tendermod.evaluation.schemas import ExperienceResponse, MultipleIndicatorResponse, GeneralRequirementList
 
 load_dotenv()
-def run_llm_indices(system_message, user_message, max_tokens=2500, temperature=0.3, top_p=0.95):
+def run_llm_indices(system_message, user_message, max_tokens=2500, temperature=0, top_p=1):
     client = OpenAI()
 
     response = client.chat.completions.create(
@@ -115,8 +115,7 @@ def run_llm_requirements_from_chapter(
         question_str += (
             "\n\n⚠️ NOTA CRÍTICA: Este bloque pertenece a un capítulo de OBLIGACIONES DEL "
             "CONTRATISTA o SUPERVISIÓN (ejecución contractual). Por defecto todos sus ítems "
-            "son tipo='OTRO'. NUNCA uses tipo='PUNTUABLE' salvo que el texto del ítem incluya "
-            "explícitamente un número de puntos asignado a ese ítem (ej. '4 puntos', 'hasta 10 pts')."
+            "son tipo='OBLIGACION', categoria='OTRO'. NUNCA uses tipo='PUNTUABLE'."
         )
     user_content = (
         qna_user_message_general_requirements

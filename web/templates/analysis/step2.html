@@ -251,27 +251,68 @@
                 {% if session.general_requirements_json %}
                     <p class="text-muted small mb-3">
                         Marque el estado de cada requisito segun la documentacion de la empresa.
-                        Los estados se guardan en la sesion y se incluyen en el Excel.
+                        Los estados y notas se guardan en la sesion y se incluyen en el Excel.
                     </p>
+
+                    <!-- Barra de filtros -->
+                    <div class="d-flex gap-2 flex-wrap align-items-center mb-3 p-2 bg-light rounded">
+                        <i class="bi bi-funnel text-muted small"></i>
+                        <select id="filter-tipo" class="form-select form-select-sm" style="width:200px">
+                            <option value="">Todos los tipos</option>
+                            <option value="HABILITANTE">Habilitante</option>
+                            <option value="HABILITANTE-EXPERIENCIA">Hab. Experiencia</option>
+                            <option value="HABILITANTE-INDICADORES">Hab. Indicadores</option>
+                            <option value="PUNTUABLE">Puntuable</option>
+                            <option value="DOCUMENTAL">Documental</option>
+                            <option value="GARANTIA">Garantia</option>
+                            <option value="CAUSAL_RECHAZO">Causal Rechazo</option>
+                            <option value="OBLIGACION">Obligacion</option>
+                            <option value="NO_ESPECIFICADO">No Especificado</option>
+                        </select>
+                        <select id="filter-cat" class="form-select form-select-sm" style="width:180px">
+                            <option value="">Todas las categorias</option>
+                            <option value="JURIDICO">Juridico</option>
+                            <option value="TECNICO">Tecnico</option>
+                            <option value="DOCUMENTACION">Documentacion</option>
+                            <option value="CAPACIDAD">Capacidad</option>
+                            <option value="FINANCIERO_OTRO">Financiero</option>
+                            <option value="GARANTIA">Garantia</option>
+                            <option value="CAUSAL_RECHAZO">Causal Rechazo</option>
+                            <option value="EVALUACION">Evaluacion</option>
+                            <option value="EXPERIENCIA">Experiencia</option>
+                            <option value="IDIOMA">Idioma</option>
+                            <option value="OTRO">Otro</option>
+                        </select>
+                        <button class="btn btn-outline-secondary btn-sm" id="btn-filter-reset">
+                            <i class="bi bi-x-circle me-1"></i>Limpiar
+                        </button>
+                        <span class="text-muted small ms-auto" id="filter-count"></span>
+                    </div>
 
                     <!-- Checklist agrupado por categoria -->
                     {% regroup general_requirements by categoria as req_by_cat %}
                     {% for cat_group in req_by_cat %}
-                        <h6 class="text-muted small text-uppercase mt-3 mb-2">
+                        <h6 class="cat-header text-muted small text-uppercase mt-3 mb-2">
                             <i class="bi bi-tag me-1"></i>{{ cat_group.grouper }}
                         </h6>
+                        <div class="cat-section">
                         {% for req in cat_group.list %}
-                        <div class="d-flex align-items-center gap-3 mb-2 p-2 border rounded bg-white">
+                        <div class="d-flex align-items-start gap-3 mb-2 p-2 border rounded bg-white req-row"
+                             data-tipo="{{ req.tipo }}" data-cat="{{ req.categoria }}">
                             <div class="flex-grow-1">
-                                <div class="small text-muted">
-                                    {{ req.seccion }}
-                                    {% if req.pagina != "N/A" %}&nbsp;&bull;&nbsp;Pag. {{ req.pagina }}{% endif %}
-                                    {% if req.tipo == "CAUSAL_RECHAZO" %}<span class="badge bg-danger ms-1">Causal Rechazo</span>
-                                    {% elif req.tipo == "PUNTUABLE" %}<span class="badge bg-info text-dark ms-1">Puntuable</span>
-                                    {% elif req.tipo == "GARANTIA" %}<span class="badge bg-warning text-dark ms-1">Garantia</span>
-                                    {% elif req.tipo == "HABILITANTE" %}<span class="badge bg-success ms-1">Habilitante</span>
-                                    {% elif req.tipo == "DOCUMENTAL" %}<span class="badge bg-secondary ms-1">Documental</span>
+                                <div class="small text-muted mb-1">
+                                    <span class="badge bg-light text-dark border me-1">{{ req.categoria }}</span>
+                                    {% if req.tipo == "CAUSAL_RECHAZO" %}<span class="badge bg-danger me-1">Causal Rechazo</span>
+                                    {% elif req.tipo == "PUNTUABLE" %}<span class="badge bg-info text-dark me-1">Puntuable</span>
+                                    {% elif req.tipo == "GARANTIA" %}<span class="badge bg-warning text-dark me-1">Garantia</span>
+                                    {% elif req.tipo == "HABILITANTE" %}<span class="badge bg-success me-1">Habilitante</span>
+                                    {% elif req.tipo == "HABILITANTE-EXPERIENCIA" %}<span class="badge bg-success me-1">Hab. Experiencia</span>
+                                    {% elif req.tipo == "HABILITANTE-INDICADORES" %}<span class="badge bg-primary me-1">Hab. Indicadores</span>
+                                    {% elif req.tipo == "DOCUMENTAL" %}<span class="badge bg-secondary me-1">Documental</span>
+                                    {% elif req.tipo == "OBLIGACION" %}<span class="badge bg-dark me-1">Obligacion</span>
                                     {% endif %}
+                                    {% if req.seccion != "N/A" %}{{ req.seccion }}{% endif %}
+                                    {% if req.pagina != "N/A" %}&nbsp;&bull;&nbsp;Pag.&nbsp;{{ req.pagina }}{% endif %}
                                     {% if req.origen == "QA" %}<span class="badge bg-info ms-1">Q&A</span>{% endif %}
                                     {% if req.origen == "MANUAL" %}<span class="badge bg-warning text-dark ms-1">Manual</span>{% endif %}
                                 </div>
@@ -280,16 +321,22 @@
                                 <div class="small text-primary mt-1"><i class="bi bi-file-earmark me-1"></i>{{ req.documento_formato }}</div>
                                 {% endif %}
                             </div>
-                            <select class="form-select form-select-sm estado-select flex-shrink-0"
-                                    style="width:140px"
-                                    data-req-id="{{ req.id }}">
-                                <option value="PENDIENTE" {% if req.estado == "PENDIENTE" %}selected{% endif %}>Pendiente</option>
-                                <option value="CUMPLE"    {% if req.estado == "CUMPLE"    %}selected{% endif %}>Cumple</option>
-                                <option value="NO_CUMPLE" {% if req.estado == "NO_CUMPLE" %}selected{% endif %}>No Cumple</option>
-                                <option value="N/A"       {% if req.estado == "N/A"       %}selected{% endif %}>N/A</option>
-                            </select>
+                            <div class="d-flex flex-column gap-1 flex-shrink-0" style="width:180px">
+                                <select class="form-select form-select-sm estado-select"
+                                        data-req-id="{{ req.id }}">
+                                    <option value="EN_REVISION" {% if req.estado == "EN_REVISION" or req.estado == "PENDIENTE" %}selected{% endif %}>En Revision</option>
+                                    <option value="CUMPLE"      {% if req.estado == "CUMPLE"      %}selected{% endif %}>Cumple</option>
+                                    <option value="NO_CUMPLE"   {% if req.estado == "NO_CUMPLE"   %}selected{% endif %}>No Cumple</option>
+                                    <option value="N/A"         {% if req.estado == "N/A"         %}selected{% endif %}>N/A</option>
+                                </select>
+                                <textarea class="form-control form-control-sm nota-input"
+                                          data-req-id="{{ req.id }}"
+                                          rows="2"
+                                          placeholder="Nota...">{{ req.nota }}</textarea>
+                            </div>
                         </div>
                         {% endfor %}
+                        </div>
                     {% empty %}
                         <p class="text-muted">No se encontraron requisitos generales en la extraccion.</p>
                     {% endfor %}
@@ -483,12 +530,49 @@ function getCsrfToken() {
     return el ? el.value : '';
 }
 
-// Guardar estados del checklist
+// Filtros del checklist
+function applyFilters() {
+    var tipo = document.getElementById('filter-tipo') ? document.getElementById('filter-tipo').value : '';
+    var cat  = document.getElementById('filter-cat')  ? document.getElementById('filter-cat').value  : '';
+    var rows = document.querySelectorAll('.req-row');
+    var visible = 0;
+    rows.forEach(function(row) {
+        var match = (!tipo || row.dataset.tipo === tipo) && (!cat || row.dataset.cat === cat);
+        row.style.display = match ? '' : 'none';
+        if (match) visible++;
+    });
+    var countEl = document.getElementById('filter-count');
+    if (countEl) countEl.textContent = visible + ' de ' + rows.length + ' requisitos';
+    // Ocultar cabecera si ningún hijo de su sección es visible
+    document.querySelectorAll('.cat-header').forEach(function(h) {
+        var section = h.nextElementSibling;
+        var anyVisible = section && Array.from(section.querySelectorAll('.req-row')).some(function(r) {
+            return r.style.display !== 'none';
+        });
+        h.style.display = anyVisible ? '' : 'none';
+        if (section) section.style.display = anyVisible ? '' : 'none';
+    });
+}
+var filterTipo = document.getElementById('filter-tipo');
+var filterCat  = document.getElementById('filter-cat');
+var btnReset   = document.getElementById('btn-filter-reset');
+if (filterTipo) filterTipo.addEventListener('change', applyFilters);
+if (filterCat)  filterCat.addEventListener('change', applyFilters);
+if (btnReset) btnReset.addEventListener('click', function() {
+    if (filterTipo) filterTipo.value = '';
+    if (filterCat)  filterCat.value  = '';
+    applyFilters();
+});
+applyFilters();
+
+// Guardar estados y notas del checklist
 var btnSave = document.getElementById('btn-save-checklist');
 if (btnSave) {
     btnSave.addEventListener('click', function() {
         var updates = Array.from(document.querySelectorAll('.estado-select')).map(function(s) {
-            return { id: parseInt(s.dataset.reqId), estado: s.value };
+            var id = parseInt(s.dataset.reqId);
+            var notaEl = document.querySelector('.nota-input[data-req-id="' + id + '"]');
+            return { id: id, estado: s.value, nota: notaEl ? notaEl.value : '' };
         });
         var spinnerEl = document.getElementById('spinner-save-checklist');
         if (spinnerEl) spinnerEl.innerHTML = '<div class="spinner-border spinner-border-sm text-success" role="status"></div>';
@@ -505,7 +589,7 @@ if (btnSave) {
         .then(function(d) {
             if (spinnerEl) {
                 if (d.status === 'ok') {
-                    spinnerEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Estados guardados.</span>';
+                    spinnerEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Estados y notas guardados.</span>';
                 } else {
                     spinnerEl.innerHTML = '<span class="text-danger">Error: ' + (d.error || 'desconocido') + '</span>';
                 }

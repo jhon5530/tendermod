@@ -8,6 +8,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponse, FileResponse, Http404
 from django.shortcuts import render, redirect, get_object_or_404
+from django.urls import reverse
 from django.views.decorators.http import require_POST, require_GET
 
 from apps.core.models import AnalysisSession, AnalysisResult, SystemConfig
@@ -76,6 +77,10 @@ def analysis_new(request):
             session.save(update_fields=['celery_task_id', 'updated_at'])
 
             logger.info('Sesion %s creada, tarea de ingesta %s lanzada', session.pk, task.id)
+            action = request.POST.get('action', 'manual')
+            if action == 'auto':
+                auto_url = reverse('analysis:analysis_auto', kwargs={'pk': session.pk})
+                return redirect(f'{auto_url}?ingest_task={task.id}')
             return redirect('analysis:step1', pk=session.pk)
         else:
             messages.error(request, 'Formulario invalido: ' + str(form.errors))
@@ -321,7 +326,10 @@ def analysis_checklist_save(request, pk):
     session = get_object_or_404(AnalysisSession, pk=pk)
     try:
         body = json.loads(request.body)
-        updates = {item['id']: item['estado'] for item in body.get('updates', [])}
+        updates = {
+            item['id']: {'estado': item.get('estado'), 'nota': item.get('nota', '')}
+            for item in body.get('updates', [])
+        }
     except (json.JSONDecodeError, KeyError, TypeError):
         return JsonResponse({'error': 'Body JSON invalido'}, status=400)
 
@@ -333,7 +341,10 @@ def analysis_checklist_save(request, pk):
         req_list = GeneralRequirementList.model_validate_json(session.general_requirements_json)
         for req in req_list.requisitos:
             if req.id in updates:
-                req.estado = updates[req.id]
+                upd = updates[req.id]
+                if upd.get('estado'):
+                    req.estado = upd['estado']
+                req.nota = upd.get('nota', req.nota)
         session.general_requirements_json = req_list.model_dump_json()
         session.save(update_fields=['general_requirements_json', 'updated_at'])
     except Exception as exc:
@@ -603,7 +614,8 @@ def export_excel(request, pk):
 
                 cl_headers = [
                     '#', 'Categoria', 'Tipo', 'Descripcion', 'Extracto Pliego',
-                    'Documento/Formato', 'Obligatorio', 'Seccion', 'Pagina', 'Estado', 'Origen',
+                    'Documento/Formato', 'Obligatorio', 'Seccion', 'Pagina',
+                    'Estado', 'Nota', 'Origen',
                 ]
                 for col_num, header in enumerate(cl_headers, 1):
                     cell = ws_cl.cell(row=1, column=col_num, value=header)
@@ -628,16 +640,16 @@ def export_excel(request, pk):
                         req.id, req.categoria, req.tipo, req.descripcion,
                         (req.extracto_pliego or '')[:600],
                         req.documento_formato, req.obligatorio, req.seccion,
-                        req.pagina, req.estado, req.origen,
+                        req.pagina, req.estado, getattr(req, 'nota', ''), req.origen,
                     ])
                     fill = tipo_fills.get(req.tipo)
                     if fill:
-                        for col in range(1, 12):
+                        for col in range(1, 13):
                             ws_cl.cell(row=row_num, column=col).fill = fill
                     # Categoría EXPERIENCIA tiene color propio (naranja) que sobrescribe el tipo
                     if req.categoria == 'EXPERIENCIA':
                         exp_fill = PatternFill('solid', fgColor='FFE4B5')
-                        for col in range(1, 12):
+                        for col in range(1, 13):
                             ws_cl.cell(row=row_num, column=col).fill = exp_fill
                     # Hipervínculo en columna Pagina (col 9) → abre PDF en la página indicada
                     try:
@@ -852,6 +864,44 @@ def export_context(request, pk):
 
 
 # ---------------------------------------------------------------------------
+# Vista: Evaluacion Automatica
+# ---------------------------------------------------------------------------
+
+def analysis_auto(request, pk):
+    """Renderiza la pagina de evaluacion automatica con barra de progreso."""
+    session = get_object_or_404(AnalysisSession, pk=pk)
+    context = {
+        'session': session,
+        'ingest_task_id': request.GET.get('ingest_task', ''),
+        'results_url': reverse('analysis:results', kwargs={'pk': pk}),
+        'extract_url': reverse('analysis:extract', kwargs={'pk': pk}),
+        'auto_exp_url': reverse('analysis:auto_evaluate_experience', kwargs={'pk': pk}),
+        'auto_ind_url': reverse('analysis:auto_evaluate_indicators', kwargs={'pk': pk}),
+    }
+    return render(request, 'analysis/auto.html', context)
+
+
+@require_POST
+def auto_evaluate_experience(request, pk):
+    """Lanza evaluacion de experiencia usando los datos ya extraidos en la sesion."""
+    session = get_object_or_404(AnalysisSession, pk=pk)
+    exp_dict = json.loads(session.experience_requirements_json or '{}')
+    threshold = SystemConfig.get_solo().threshold_objeto
+    task = evaluate_experience_task.delay(session.id, exp_dict, threshold)
+    return JsonResponse({'task_id': task.id})
+
+
+@require_POST
+def auto_evaluate_indicators(request, pk):
+    """Lanza evaluacion de indicadores usando los datos ya extraidos en la sesion."""
+    session = get_object_or_404(AnalysisSession, pk=pk)
+    raw = json.loads(session.indicators_requirements_json or '{"answer": []}')
+    indicators_list = raw.get('answer', [])
+    task = evaluate_indicators_task.delay(session.id, indicators_list)
+    return JsonResponse({'task_id': task.id})
+
+
+# ---------------------------------------------------------------------------
 # Vista: Evaluacion Rapida
 # ---------------------------------------------------------------------------
 
@@ -980,23 +1030,37 @@ def session_rename(request, pk):
 
 def team_qa(request):
     """Página de Evaluación Equipo: chat en lenguaje natural contra SQLite."""
-    return render(request, 'analysis/team_qa.html')
+    history = request.session.get('team_chat_history', [])
+    return render(request, 'analysis/team_qa.html', {'chat_history': history})
 
 
 @require_POST
 def team_qa_query(request):
-    """Endpoint síncrono: pregunta → SQL Agent → respuesta."""
+    """Endpoint síncrono: pregunta → pipeline team_inference → respuesta con memoria."""
     body = json.loads(request.body)
     question = body.get('question', '').strip()
     if not question:
         return JsonResponse({'error': 'Pregunta vacía'}, status=400)
+    history = request.session.get('team_chat_history', [])
     try:
         from tendermod.evaluation.team_inference import ask_team
-        answer = ask_team(question)
+        answer = ask_team(question, chat_history=history)
+        history.append({'role': 'user', 'content': question})
+        history.append({'role': 'assistant', 'content': answer})
+        request.session['team_chat_history'] = history[-10:]  # ventana: 5 turnos
+        request.session.modified = True
         return JsonResponse({'answer': answer})
     except Exception as exc:
         logger.error('team_qa_query error: %s', exc)
         return JsonResponse({'error': str(exc)}, status=500)
+
+
+@require_POST
+def team_qa_clear(request):
+    """Limpia el historial de conversación del equipo de la sesión Django."""
+    request.session.pop('team_chat_history', None)
+    request.session.modified = True
+    return JsonResponse({'status': 'ok'})
 
 
 @require_POST

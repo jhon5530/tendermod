@@ -158,7 +158,7 @@ def indicators_comparation() -> Optional[IndicatorComplianceResult]:
     """Query para obtener los indicadores del RAG"""
     query = "Cuales los indicadores financieros como: Rentabilidades, capacidades, endeudamiento, indices"
     
-    k = 2
+    k = 5
     tender_indicators = get_indicators(user_input=query, k=k)
     if tender_indicators is None:
         return IndicatorComplianceResult(

@@ -15,10 +15,10 @@ from tendermod.retrieval.vectorstore import read_vectorstore
 logger = logging.getLogger(__name__)
 
 _INDICATOR_KEYWORDS = [
-    "financiero", "financiera", "indicador", "capacidad",
+    "financiero", "financiera", "indicador",
     "liquidez", "endeudamiento", "cobertura", "capital de trabajo",
 ]
-_MAX_INDICATOR_CHARS = 40_000
+_MAX_INDICATOR_CHARS = 65_000
 
 
 def _get_pdf_path() -> str:

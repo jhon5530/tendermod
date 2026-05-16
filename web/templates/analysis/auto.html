@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Evaluacion Automatica{% endblock %}
+{% block nav_new %}active{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-header card-header-tendermod">
+                <h5 class="mb-0">
+                    <i class="bi bi-play-circle me-2"></i>Evaluacion Automatica
+                </h5>
+            </div>
+            <div class="card-body p-4">
+                <p class="text-muted mb-1 small">
+                    <i class="bi bi-file-earmark-pdf me-1"></i>
+                    <strong>{{ session.pdf_filename }}</strong>
+                </p>
+                <p class="text-muted mb-4 small">
+                    El sistema esta ejecutando todos los pasos de extraccion y evaluacion de forma automatica.
+                    No cierre esta ventana.
+                </p>
+
+                <!-- Barra de progreso -->
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="fw-semibold small" id="progress-label">Iniciando...</span>
+                        <span class="text-muted small">
+                            <i class="bi bi-stopwatch me-1"></i><span id="timer">00:00</span>
+                            &nbsp;&nbsp;<span class="fw-semibold" id="progress-pct">0%</span>
+                        </span>
+                    </div>
+                    <div class="progress" style="height: 12px;">
+                        <div id="progress-bar"
+                             class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                             role="progressbar" style="width: 0%">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Lista de pasos -->
+                <ul class="list-group list-group-flush" id="steps-list">
+                    <li class="list-group-item px-0 d-flex align-items-center gap-3" id="step-0">
+                        <span class="step-icon text-muted"><i class="bi bi-circle"></i></span>
+                        <span class="step-label text-muted">Ingesta del PDF en base vectorial</span>
+                    </li>
+                    <li class="list-group-item px-0 d-flex align-items-center gap-3" id="step-1">
+                        <span class="step-icon text-muted"><i class="bi bi-circle"></i></span>
+                        <span class="step-label text-muted">Extraccion de requisitos de experiencia</span>
+                    </li>
+                    <li class="list-group-item px-0 d-flex align-items-center gap-3" id="step-2">
+                        <span class="step-icon text-muted"><i class="bi bi-circle"></i></span>
+                        <span class="step-label text-muted">Extraccion de indicadores financieros</span>
+                    </li>
+                    <li class="list-group-item px-0 d-flex align-items-center gap-3" id="step-3">
+                        <span class="step-icon text-muted"><i class="bi bi-circle"></i></span>
+                        <span class="step-label text-muted">Extraccion de informacion general del proceso</span>
+                    </li>
+                    <li class="list-group-item px-0 d-flex align-items-center gap-3" id="step-4">
+                        <span class="step-icon text-muted"><i class="bi bi-circle"></i></span>
+                        <span class="step-label text-muted">Extraccion de requisitos habilitantes</span>
+                    </li>
+                    <li class="list-group-item px-0 d-flex align-items-center gap-3" id="step-5">
+                        <span class="step-icon text-muted"><i class="bi bi-circle"></i></span>
+                        <span class="step-label text-muted">Evaluacion de cumplimiento de experiencia</span>
+                    </li>
+                    <li class="list-group-item px-0 d-flex align-items-center gap-3" id="step-6">
+                        <span class="step-icon text-muted"><i class="bi bi-circle"></i></span>
+                        <span class="step-label text-muted">Evaluacion de indicadores financieros</span>
+                    </li>
+                </ul>
+
+                <!-- Botón de resultados (aparece al completar) -->
+                <div id="completion-actions" class="d-none mt-4 text-center">
+                    <p class="text-success fw-semibold mb-3">
+                        <i class="bi bi-check-circle-fill me-2"></i>Evaluacion completada
+                    </p>
+                    <a id="btn-results" href="#" class="btn btn-success btn-lg px-5">
+                        <i class="bi bi-bar-chart-line me-2"></i>Ver Resultados
+                    </a>
+                </div>
+
+                <!-- Error global -->
+                <div id="global-error" class="alert alert-danger mt-4 d-none">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    <strong>Error en la evaluacion automatica.</strong>
+                    <span id="global-error-msg"></span>
+                    <div class="mt-2">
+                        <a href="{% url 'analysis:step1' pk=session.pk %}" class="btn btn-sm btn-outline-danger">
+                            Ir al modo manual
+                        </a>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var INGEST_TASK_ID = '{{ ingest_task_id }}';
+var RESULTS_URL   = '{{ results_url }}';
+var EXTRACT_URL   = '{{ extract_url }}';
+var AUTO_EXP_URL  = '{{ auto_exp_url }}';
+var AUTO_IND_URL  = '{{ auto_ind_url }}';
+var CSRF_TOKEN    = '{{ csrf_token }}';
+var TASK_STATUS_BASE = '/api/task-status/';
+
+var STEPS = [
+    { id: 'step-0', label: 'Ingesta del PDF en base vectorial',               weight: 15, type: 'poll',   taskId: INGEST_TASK_ID },
+    { id: 'step-1', label: 'Extraccion de requisitos de experiencia',          weight: 15, type: 'launch', url: EXTRACT_URL, body: {action: 'experience'} },
+    { id: 'step-2', label: 'Extraccion de indicadores financieros',            weight: 15, type: 'launch', url: EXTRACT_URL, body: {action: 'indicators'} },
+    { id: 'step-3', label: 'Extraccion de informacion general del proceso',    weight: 10, type: 'launch', url: EXTRACT_URL, body: {action: 'general_info'} },
+    { id: 'step-4', label: 'Extraccion de requisitos habilitantes',            weight: 15, type: 'launch', url: EXTRACT_URL, body: {action: 'general_requirements'} },
+    { id: 'step-5', label: 'Evaluacion de cumplimiento de experiencia',        weight: 15, type: 'launch', url: AUTO_EXP_URL, body: {} },
+    { id: 'step-6', label: 'Evaluacion de indicadores financieros',            weight: 15, type: 'launch', url: AUTO_IND_URL, body: {} },
+];
+
+var totalProgress = 0;
+var timerInterval = null;
+var startTime = null;
+
+function startTimer() {
+    startTime = Date.now();
+    timerInterval = setInterval(function() {
+        var elapsed = Math.floor((Date.now() - startTime) / 1000);
+        var mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        var ss = String(elapsed % 60).padStart(2, '0');
+        document.getElementById('timer').textContent = mm + ':' + ss;
+    }, 1000);
+}
+
+function stopTimer() {
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+}
+
+function setStepRunning(idx) {
+    var el = document.getElementById(STEPS[idx].id);
+    el.querySelector('.step-icon').innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
+    el.querySelector('.step-label').classList.remove('text-muted');
+    el.querySelector('.step-label').classList.add('text-primary', 'fw-semibold');
+    document.getElementById('progress-label').textContent = STEPS[idx].label + '...';
+}
+
+function setStepDone(idx) {
+    var el = document.getElementById(STEPS[idx].id);
+    el.querySelector('.step-icon').innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
+    el.querySelector('.step-label').classList.remove('text-muted', 'text-primary', 'fw-semibold');
+    el.querySelector('.step-label').classList.add('text-success');
+}
+
+function setStepError(idx, msg) {
+    var el = document.getElementById(STEPS[idx].id);
+    el.querySelector('.step-icon').innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
+    el.querySelector('.step-label').classList.remove('text-muted', 'text-primary', 'fw-semibold');
+    el.querySelector('.step-label').classList.add('text-danger');
+    document.getElementById('global-error').classList.remove('d-none');
+    document.getElementById('global-error-msg').textContent = ' ' + (msg || '');
+}
+
+function updateProgressBar(pct) {
+    var bar = document.getElementById('progress-bar');
+    bar.style.width = pct + '%';
+    document.getElementById('progress-pct').textContent = pct + '%';
+    if (pct >= 100) {
+        bar.classList.remove('progress-bar-animated', 'progress-bar-striped');
+    }
+}
+
+function pollTaskId(taskId) {
+    return new Promise(function(resolve, reject) {
+        var interval = setInterval(function() {
+            fetch(TASK_STATUS_BASE + taskId + '/')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.status === 'SUCCESS') {
+                        clearInterval(interval);
+                        resolve(data.result);
+                    } else if (data.status === 'FAILURE') {
+                        clearInterval(interval);
+                        reject(new Error(data.error || 'Tarea fallida'));
+                    }
+                })
+                .catch(function(err) {
+                    clearInterval(interval);
+                    reject(err);
+                });
+        }, 2500);
+    });
+}
+
+function launchAndPoll(url, body) {
+    return fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': CSRF_TOKEN,
+        },
+        body: JSON.stringify(body),
+    })
+    .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    })
+    .then(function(data) {
+        if (!data.task_id) throw new Error('Sin task_id en respuesta');
+        return pollTaskId(data.task_id);
+    });
+}
+
+async function runAutoEvaluation() {
+    startTimer();
+    for (var i = 0; i < STEPS.length; i++) {
+        var step = STEPS[i];
+        setStepRunning(i);
+        try {
+            if (step.type === 'poll') {
+                await pollTaskId(step.taskId);
+            } else {
+                await launchAndPoll(step.url, step.body);
+            }
+            totalProgress += step.weight;
+            updateProgressBar(totalProgress);
+            setStepDone(i);
+        } catch (e) {
+            stopTimer();
+            setStepError(i, e.message || '');
+            return;
+        }
+    }
+    stopTimer();
+    document.getElementById('progress-label').textContent = '¡Completado!';
+    document.getElementById('btn-results').href = RESULTS_URL;
+    document.getElementById('completion-actions').classList.remove('d-none');
+}
+
+runAutoEvaluation();
+</script>
+{% endblock %}

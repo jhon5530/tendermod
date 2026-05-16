@@ -169,5 +169,10 @@ LOGGING = {
             'level': 'DEBUG',
             'propagate': False,
         },
+        'tendermod': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
     },
 }

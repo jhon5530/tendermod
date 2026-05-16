@@ -363,6 +363,8 @@ Extrae TODOS los requerimientos sin excepción, incluyendo indicadores financier
 - GARANTIA       : pólizas (seriedad, cumplimiento, estabilidad, responsabilidad civil, etc.)
 - CAUSAL_RECHAZO : condiciones explícitas de rechazo de oferta (sección 2.x en AMPs)
 - EVALUACION     : criterios de puntaje (técnicos, económicos, industria nacional, MiPymes)
+- IDIOMA         : requisito sobre el idioma o lenguaje de presentación de la oferta
+                   (ej. "la oferta debe redactarse en español", "documentos en idioma oficial")
 - OTRO           : cualquier otro requerimiento no clasificable en las anteriores
 
 == TIPOS ==
@@ -377,6 +379,9 @@ Extrae TODOS los requerimientos sin excepción, incluyendo indicadores financier
 - DOCUMENTAL     : formulario o formato que debe acompañar la oferta
 - GARANTIA       : póliza o garantía exigida
 - CAUSAL_RECHAZO : condición que genera rechazo automático de la propuesta
+- OBLIGACION     : obligación del contratista durante la ejecución del contrato (post-adjudicación).
+                   No es criterio de oferta ni de evaluación de propuesta.
+- IDIOMA         : requisito sobre el idioma o lenguaje de presentación de la oferta.
 - NO_ESPECIFICADO: cuando no hay suficiente contexto para determinar el tipo
 
 == REGLAS CRÍTICAS ==
@@ -401,8 +406,10 @@ Extrae TODOS los requerimientos sin excepción, incluyendo indicadores financier
      categoria="DOCUMENTACION".
    - Una póliza: categoria="GARANTIA", tipo="GARANTIA".
    - OBLIGACIONES / SUPERVISIÓN: si la pregunta contiene la nota "OBLIGACIONES DEL
-     CONTRATISTA o SUPERVISIÓN", todos los ítems de ese bloque son tipo="OTRO",
-     NUNCA "PUNTUABLE".
+     CONTRATISTA o SUPERVISIÓN", todos los ítems de ese bloque son tipo="OBLIGACION",
+     categoria="OTRO". NUNCA uses tipo="PUNTUABLE" en estos bloques.
+   - Un ítem sobre el idioma o lenguaje de presentación de la oferta: tipo="IDIOMA",
+     categoria="IDIOMA".
 
 3) DOCUMENTO/FORMATO:
    - Si el requisito menciona "FORMATO No. X", "ANEXO No. X", "FORMULARIO No. X", pon ese
@@ -532,10 +539,16 @@ Ejemplos de valores en la columna Certificacion:
 "HPE Sales Certified - Networking Solutions"
 
 Reglas de parseo:
-- Cuando la pregunta mencione una certificación específica (CCNA, CCNP, Crowdstrike, Fortinet, Aruba, NSE, etc.),
+- Cuando la pregunta mencione UNA certificación específica (CCNA, CCNP, Crowdstrike, Fortinet, Aruba, NSE, etc.),
   pon ese término en filter_cert. Se buscará con LIKE '%term%' en la columna Certificacion.
-- Cuando la pregunta mencione una marca o categoría general (Cisco, HPE, Huawei, seguridad, cableado),
+- Cuando la pregunta mencione UNA marca o categoría general (Cisco, HPE, Huawei, seguridad, cableado),
   pon el término en filter_categoria. Se buscará con LIKE en la columna Categoria.
+- Si la pregunta combina DOS O MÁS certificaciones con "y", "e", "and" (ej: "Cisco y ITIL", "CCNA y NSE"):
+  · Usa filter_cert_list con los términos de certificación (ej: ['ITIL', 'NSE']).
+  · Usa filter_categoria_list con los términos de categoría/marca (ej: ['CISCO', 'FORTINET']).
+  · "Cisco" es una categoría (va en filter_categoria_list), "ITIL" es una cert (va en filter_cert_list).
+  · NO uses filter_cert ni filter_categoria cuando ya usas las variantes _list.
+  · La búsqueda retornará solo personas que tengan TODAS las certs/categorías indicadas.
 - Si la pregunta pide "cuántos", "número de", usa action="count".
 - Si la pregunta pide nombres, lista, "quiénes", usa action="list".
 - Si la pregunta pide fechas, detalles, "información de", usa action="detail".

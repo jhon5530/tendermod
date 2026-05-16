@@ -138,7 +138,7 @@ def get_general_info(user_input: str, k: int):
     chunks = chunk_docs(docs)
 
     vectorStore = read_vectorstore(embed_docs(), path=CHROMA_PERSIST_DIR)
-    retriever = create_retriever(vectorStore, k)
+    retriever = create_retriever(vectorStore, k, lambda_mult=0.6)
 
     context_for_query = build_context(retriever, chunks, user_input, k=k)
     return context_for_query

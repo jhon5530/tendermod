@@ -21,8 +21,12 @@
 
         <!-- Pregunta -->
         <div class="card border-0 shadow-sm mb-4">
-            <div class="card-header card-header-tendermod">
+            <div class="card-header card-header-tendermod d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-chat-dots me-2"></i>Consultar al agente</h5>
+                <button class="btn btn-outline-secondary btn-sm" id="btn-clear-chat"
+                        title="Limpiar historial y empezar nueva conversacion">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>Nueva conversacion
+                </button>
             </div>
             <div class="card-body">
                 <div class="input-group mb-2">
@@ -126,7 +130,11 @@
 {% block extra_js %}
 <script>
 var QUERY_URL = "{% url 'analysis:team_qa_query' %}";
+var CLEAR_URL  = "{% url 'analysis:team_qa_clear' %}";
 var DB_STATUS_URL = "/api/db-status/";
+
+// Historial persistido en sesión Django — hidrata el chat al cargar la página
+var INITIAL_HISTORY = {{ chat_history|safe }};
 
 function getCsrfToken() {
     var el = document.querySelector('[name=csrfmiddlewaretoken]');
@@ -137,6 +145,16 @@ function useSuggestion(btn) {
     document.getElementById('team-question').value = btn.textContent.trim();
     doAsk();
 }
+
+// Botón "Nueva conversación"
+document.getElementById('btn-clear-chat').addEventListener('click', function() {
+    fetch(CLEAR_URL, {
+        method: 'POST',
+        headers: {'X-CSRFToken': getCsrfToken()},
+    }).then(function() {
+        document.getElementById('chat-history').innerHTML = '';
+    });
+});
 
 function doAsk() {
     var input = document.getElementById('team-question');
@@ -203,6 +221,27 @@ function escapeHtml(text) {
     d.appendChild(document.createTextNode(text));
     return d.innerHTML;
 }
+
+// Hidratar historial desde sesión Django (orden cronológico: más antiguo primero)
+// appendMessage inserta al inicio del div, así que recorremos en orden inverso
+// para que el más reciente quede arriba.
+(function() {
+    var pairs = [];
+    for (var i = 0; i < INITIAL_HISTORY.length; i += 2) {
+        var userMsg = INITIAL_HISTORY[i];
+        var assistantMsg = INITIAL_HISTORY[i + 1];
+        if (userMsg && assistantMsg) {
+            pairs.push([userMsg.content, assistantMsg.content]);
+        }
+    }
+    // Insertar en orden inverso para que insertBefore deje el más reciente arriba
+    for (var j = pairs.length - 1; j >= 0; j--) {
+        appendMessage(pairs[j][0], pairs[j][1], false);
+    }
+    if (pairs.length > 0) {
+        document.getElementById('suggestions').classList.add('d-none');
+    }
+})();
 
 // Cargar estado de tablas de equipo
 fetch(DB_STATUS_URL)

@@ -270,7 +270,7 @@ def validate_chapter_ranges(chapters: list[dict], n_total_pages: int) -> list[di
     return result
 
 
-_COVERAGE_THRESHOLD = 0.40  # Si el LLM cubre < 40% del doc, complementar con visual.
+_COVERAGE_THRESHOLD = 0.95  # LLM escanea solo 25 páginas; complementar visual si no cubre ≥95% del PDF.
 
 
 def get_chapter_ranges(pdf_path: str, use_llm: bool = True) -> list[dict]:

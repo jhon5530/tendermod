@@ -128,8 +128,11 @@ def extract_indicators_task(self, session_id):
         session.save(update_fields=['celery_task_id', 'updated_at'])
 
         query = (
-            'Indicadores de capacidad financiera requeridos: '
-            'liquidez, endeudamiento, razon de cobertura de intereses, capital de trabajo'
+            'Extrae TODOS los indicadores financieros y organizacionales requeridos como '
+            'habilitantes en el pliego. Incluye sin omitir: liquidez, endeudamiento, '
+            'razon de cobertura de intereses, capital de trabajo, rentabilidad del '
+            'patrimonio, rentabilidad del activo, y cualquier otro indicador con umbral '
+            'numerico que aparezca en el documento.'
         )
         logger.info('Extrayendo indicadores para sesion %s', session_id)
         ind_response, indicators_context = get_indicators(user_input=query, k=5)
@@ -273,16 +276,17 @@ def evaluate_indicators_task(self, session_id, ind_list):
             'Devuelve un objeto JSON valido con los siguientes indicadores financieros. '
             'Busca en la tabla el indicador mas semanticamente cercano aunque el nombre sea diferente '
             '(ej: "Utilidad operacional sobre activos" equivale a "RENTABILIDAD DEL ACTIVO", '
-            '"Nivel de Endeudamiento" equivale a "INDICE DE ENDEUDAMIENTO").\n\n'
+            '"Nivel de Endeudamiento" equivale a "INDICE DE ENDEUDAMIENTO", '
+            '"Razon de Cobertura de Intereses" equivale a "RAZON DE COBRERTURA DE INTERES").\n\n'
             f'Indicadores solicitados:\n{indicator_names}\n\n'
             'REGLAS:\n'
             '1) Responde EXCLUSIVAMENTE con JSON valido (un unico objeto).\n'
             '2) Prohibido: explicaciones, markdown, texto adicional, encabezados, bloques ```json.\n'
             '3) El campo "nombre" DEBE ser EXACTAMENTE el nombre solicitado arriba, no el nombre de la columna en la DB.\n'
-            '4) Si realmente no hay ningun indicador similar en la DB, incluyelo en faltantes.\n'
-            '5) valor debe ser numero cuando sea posible.\n\n'
+            '4) Si no hay ningun indicador similar en la DB, incluyelo en "faltantes" con valor null — NUNCA uses 0 para un indicador no encontrado.\n'
+            '5) valor debe ser el numero real de la BD. Si el indicador no existe su valor es null, no cero.\n\n'
             'FORMATO (exacto):\n'
-            '{"indicadores":[{"nombre":"nombre exacto solicitado","valor":0.0}],"faltantes":[]}'
+            '{"indicadores":[{"nombre":"Indice de Liquidez","valor":3.04},{"nombre":"Capital de Trabajo","valor":5744148157.0}],"faltantes":[]}'
         )
 
         gold_indicators = get_specific_gold_indicator(query_gold)
@@ -456,16 +460,17 @@ def quick_evaluate_indicators_task(self, session_id, plain_text):
             'Devuelve un objeto JSON valido con los siguientes indicadores financieros. '
             'Busca en la tabla el indicador mas semanticamente cercano aunque el nombre sea diferente '
             '(ej: "Utilidad operacional sobre activos" equivale a "RENTABILIDAD DEL ACTIVO", '
-            '"Nivel de Endeudamiento" equivale a "INDICE DE ENDEUDAMIENTO").\n\n'
+            '"Nivel de Endeudamiento" equivale a "INDICE DE ENDEUDAMIENTO", '
+            '"Razon de Cobertura de Intereses" equivale a "RAZON DE COBRERTURA DE INTERES").\n\n'
             f'Indicadores solicitados:\n{indicator_names}\n\n'
             'REGLAS:\n'
             '1) Responde EXCLUSIVAMENTE con JSON valido (un unico objeto).\n'
             '2) Prohibido: explicaciones, markdown, texto adicional, encabezados, bloques ```json.\n'
             '3) El campo "nombre" DEBE ser EXACTAMENTE el nombre solicitado arriba, no el nombre de la columna en la DB.\n'
-            '4) Si realmente no hay ningun indicador similar en la DB, incluyelo en faltantes.\n'
-            '5) valor debe ser numero cuando sea posible.\n\n'
+            '4) Si no hay ningun indicador similar en la DB, incluyelo en "faltantes" con valor null — NUNCA uses 0 para un indicador no encontrado.\n'
+            '5) valor debe ser el numero real de la BD. Si el indicador no existe su valor es null, no cero.\n\n'
             'FORMATO (exacto):\n'
-            '{"indicadores":[{"nombre":"nombre exacto solicitado","valor":0.0}],"faltantes":[]}'
+            '{"indicadores":[{"nombre":"Indice de Liquidez","valor":3.04},{"nombre":"Capital de Trabajo","valor":5744148157.0}],"faltantes":[]}'
         )
 
         gold_indicators = get_specific_gold_indicator(query_gold)
