@@ -402,6 +402,167 @@
         </div>
     </div>
 
+    <!-- FormD: Perfiles de Equipo de Trabajo -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header card-header-tendermod d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-people me-2"></i>FormD — Perfiles de Equipo de Trabajo</h5>
+            <div class="d-flex align-items-center gap-2">
+                {% if team_compliance %}
+                    {% if team_compliance.cumple_equipo %}
+                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Cumple</span>
+                    {% else %}
+                        <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>No cumple</span>
+                    {% endif %}
+                {% endif %}
+                <button class="btn btn-success btn-sm"
+                        id="btn-evaluate-team"
+                        onclick="doEvaluateTeamProfiles()"
+                        {% if not team_profiles %}disabled{% endif %}>
+                    <i class="bi bi-play-fill me-1"></i>
+                    {% if team_compliance %}Re-evaluar{% else %}Evaluar equipo{% endif %}
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            {% if not team_profiles %}
+                <div class="alert alert-warning mb-0">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    No se han extraido perfiles de equipo.
+                    <a href="{% url 'analysis:step1' pk=session.pk %}">Regrese al Paso 1</a>
+                    y ejecute la extraccion de Perfiles de Equipo.
+                </div>
+            {% else %}
+                <p class="text-muted small mb-3">
+                    {{ team_profiles|length }} perfil{{ team_profiles|length|pluralize:"es" }} detectado{{ team_profiles|length|pluralize:"s" }}.
+                    Presione <strong>Evaluar equipo</strong> para comparar automaticamente contra el equipo de la empresa.
+                </p>
+
+                <!-- Profiles list -->
+                <div class="accordion" id="accordionPerfiles">
+                {% for perfil in team_profiles %}
+                    <div class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button {% if not forloop.first %}collapsed{% endif %}" type="button"
+                                    data-bs-toggle="collapse"
+                                    data-bs-target="#collapse-perfil-{{ forloop.counter }}">
+                                <div class="d-flex align-items-center gap-2 w-100 me-2">
+                                    <strong>{{ perfil.rol }}</strong>
+                                    <span class="badge bg-secondary ms-1">x{{ perfil.cantidad }}</span>
+                                    {% if team_compliance %}
+                                        {% for pc in team_compliance.perfiles_evaluados %}
+                                            {% if pc.rol == perfil.rol %}
+                                                {% if pc.cumple %}
+                                                    <span class="badge bg-success ms-auto"><i class="bi bi-check me-1"></i>Cumple ({{ pc.personas_que_cumplen|length }}/{{ perfil.cantidad }})</span>
+                                                {% else %}
+                                                    <span class="badge bg-danger ms-auto"><i class="bi bi-x me-1"></i>No cumple ({{ pc.personas_que_cumplen|length }}/{{ perfil.cantidad }})</span>
+                                                {% endif %}
+                                            {% endif %}
+                                        {% endfor %}
+                                    {% endif %}
+                                </div>
+                            </button>
+                        </h2>
+                        <div id="collapse-perfil-{{ forloop.counter }}"
+                             class="accordion-collapse collapse {% if forloop.first %}show{% endif %}">
+                            <div class="accordion-body">
+                                <div class="row g-3">
+                                    <!-- Requisitos del pliego -->
+                                    <div class="col-md-6">
+                                        <h6 class="text-muted mb-2"><i class="bi bi-file-earmark-text me-1"></i>Requisitos del pliego</h6>
+                                        {% if perfil.formacion_requerida %}
+                                        <p class="mb-1"><strong>Formacion:</strong>
+                                            {{ perfil.formacion_requerida|join:" / " }}
+                                        </p>
+                                        {% endif %}
+                                        {% if perfil.posgrado_requerido %}
+                                        <p class="mb-1"><strong>Posgrado/Certificacion equivalente:</strong>
+                                            {{ perfil.posgrado_requerido|join:" / " }}
+                                        </p>
+                                        {% endif %}
+                                        {% if perfil.certificaciones_requeridas %}
+                                        <p class="mb-1"><strong>Certificaciones:</strong>
+                                            {% for cert in perfil.certificaciones_requeridas %}
+                                                <span class="badge bg-light text-dark border me-1">{{ cert }}</span>
+                                            {% endfor %}
+                                        </p>
+                                        {% endif %}
+                                        {% if perfil.anios_experiencia_min %}
+                                        <p class="mb-1"><strong>Experiencia minima:</strong> {{ perfil.anios_experiencia_min }} años</p>
+                                        {% endif %}
+                                        {% if perfil.contratos_min %}
+                                        <p class="mb-1"><strong>Contratos minimos:</strong> {{ perfil.contratos_min }}</p>
+                                        {% endif %}
+                                        {% if perfil.disponibilidad %}
+                                        <p class="mb-1"><strong>Disponibilidad:</strong> {{ perfil.disponibilidad }}</p>
+                                        {% endif %}
+                                    </div>
+                                    <!-- Resultado de evaluacion -->
+                                    <div class="col-md-6">
+                                        {% if team_compliance %}
+                                            {% for pc in team_compliance.perfiles_evaluados %}
+                                                {% if pc.rol == perfil.rol %}
+                                                    <h6 class="text-muted mb-2"><i class="bi bi-people me-1"></i>Evaluacion del equipo</h6>
+                                                    {% if pc.personas_que_cumplen %}
+                                                        <p class="mb-2 text-success fw-semibold">
+                                                            <i class="bi bi-check-circle me-1"></i>Candidatos aptos:
+                                                            {{ pc.personas_que_cumplen|join:", " }}
+                                                        </p>
+                                                    {% else %}
+                                                        <p class="mb-2 text-danger fw-semibold">
+                                                            <i class="bi bi-x-circle me-1"></i>Sin candidatos que cumplan el perfil
+                                                        </p>
+                                                    {% endif %}
+                                                    {% for persona_res in pc.personas_evaluadas %}
+                                                        <div class="border rounded p-2 mb-2 {% if persona_res.cumple %}border-success bg-success bg-opacity-10{% else %}border-light{% endif %}">
+                                                            <div class="d-flex align-items-center gap-2 mb-1">
+                                                                {% if persona_res.cumple %}
+                                                                    <i class="bi bi-check-circle-fill text-success"></i>
+                                                                {% else %}
+                                                                    <i class="bi bi-dash-circle text-secondary"></i>
+                                                                {% endif %}
+                                                                <strong class="small">{{ persona_res.persona }}</strong>
+                                                                <span class="text-muted small">{{ persona_res.cargo }}</span>
+                                                            </div>
+                                                            {% if persona_res.evidencia %}
+                                                                <ul class="mb-1 small text-success ps-3">
+                                                                {% for ev in persona_res.evidencia %}
+                                                                    <li>{{ ev }}</li>
+                                                                {% endfor %}
+                                                                </ul>
+                                                            {% endif %}
+                                                            {% if persona_res.gaps %}
+                                                                <ul class="mb-0 small text-danger ps-3">
+                                                                {% for gap in persona_res.gaps %}
+                                                                    <li>{{ gap }}</li>
+                                                                {% endfor %}
+                                                                </ul>
+                                                            {% endif %}
+                                                        </div>
+                                                    {% endfor %}
+                                                {% endif %}
+                                            {% endfor %}
+                                        {% else %}
+                                            <div class="text-muted small d-flex align-items-center gap-2">
+                                                <i class="bi bi-hourglass text-secondary"></i>
+                                                Presione "Evaluar equipo" para ver candidatos.
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+                </div>
+
+                <div id="spinner-team-eval" class="text-center py-3 d-none">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="text-muted mt-2 small">Evaluando perfiles contra el equipo... (~{{ team_profiles|length }} llamadas LLM)</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
 </div>
 
 <!-- Navigation -->
@@ -668,6 +829,24 @@ if (btnQaAdd) {
             btnQaAdd.disabled = false;
         });
     });
+}
+
+function doEvaluateTeamProfiles() {
+    var btn = document.getElementById('btn-evaluate-team');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Evaluando...';
+
+    launchEvaluation(
+        SESSION_ID,
+        'team_profiles',
+        {},
+        'spinner-team-eval',
+        function(result) {
+            btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Re-evaluar';
+            btn.disabled = false;
+            window.location.reload();
+        }
+    );
 }
 </script>
 {% endblock %}

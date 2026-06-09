@@ -80,6 +80,115 @@
 </div>
 {% else %}
 
+<!-- Resumen Ejecutivo -->
+{% if conclusion %}
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between"
+         style="background: linear-gradient(135deg, #1F4E79 0%, #2E6DA4 100%); color: white;">
+        <h5 class="mb-0">
+            <i class="bi bi-clipboard2-check me-2"></i>Resumen Ejecutivo
+        </h5>
+        {% if result.cumple_final is not None %}
+            {% if result.cumple_final %}
+                <span class="badge bg-success fs-6 px-3 py-2"><i class="bi bi-check-circle me-1"></i>CUMPLE</span>
+            {% else %}
+                <span class="badge bg-danger fs-6 px-3 py-2"><i class="bi bi-x-circle me-1"></i>NO CUMPLE</span>
+            {% endif %}
+        {% endif %}
+    </div>
+    <div class="card-body p-4">
+
+        <!-- Veredicto narrativo -->
+        <div class="mb-4">
+            <p class="text-body" style="white-space: pre-line; line-height: 1.7;">{{ conclusion.veredicto_general }}</p>
+        </div>
+
+        <div class="row g-4">
+
+            <!-- RUPs recomendados -->
+            {% if conclusion.rups_recomendados %}
+            <div class="col-md-6">
+                <h6 class="fw-semibold mb-3 text-success">
+                    <i class="bi bi-briefcase-fill me-2"></i>Contratos RUP a presentar
+                </h6>
+                <ul class="list-group list-group-flush">
+                    {% for rup in conclusion.rups_recomendados %}
+                    <li class="list-group-item px-0 py-2 border-bottom">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <span class="badge bg-success-subtle text-success border me-2">RUP {{ rup.numero_rup }}</span>
+                                <strong class="small">{{ rup.cliente|default:"" }}</strong>
+                            </div>
+                            {% if rup.valor_cop %}
+                            <span class="text-muted small ms-2 text-nowrap">${{ rup.valor_cop|floatformat:0 }} COP</span>
+                            {% endif %}
+                        </div>
+                        {% if rup.relevancia %}
+                        <p class="text-muted small mb-0 mt-1">{{ rup.relevancia }}</p>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            <!-- Equipo recomendado -->
+            {% if conclusion.personas_recomendadas %}
+            <div class="col-md-6">
+                <h6 class="fw-semibold mb-3 text-primary">
+                    <i class="bi bi-people-fill me-2"></i>Equipo recomendado
+                </h6>
+                <ul class="list-group list-group-flush">
+                    {% for perfil in conclusion.personas_recomendadas %}
+                    <li class="list-group-item px-0 py-2 border-bottom">
+                        <div class="small fw-semibold text-muted text-uppercase">{{ perfil.rol }}</div>
+                        <div class="small">
+                            {% for persona in perfil.personas %}
+                            <span class="badge bg-primary-subtle text-primary border me-1 mb-1">{{ persona }}</span>
+                            {% empty %}
+                            <span class="text-danger small">Sin candidatos aptos</span>
+                            {% endfor %}
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+        </div><!-- /row -->
+
+        <!-- Brechas -->
+        {% if conclusion.brechas %}
+        <div class="mt-4">
+            <h6 class="fw-semibold mb-2 text-danger">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>Brechas detectadas
+            </h6>
+            <ul class="mb-0">
+                {% for brecha in conclusion.brechas %}
+                <li class="text-danger small mb-1">{{ brecha }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <!-- Recomendaciones -->
+        {% if conclusion.recomendaciones %}
+        <div class="mt-4">
+            <h6 class="fw-semibold mb-2 text-warning-emphasis">
+                <i class="bi bi-lightbulb-fill me-2"></i>Recomendaciones
+            </h6>
+            <ol class="mb-0">
+                {% for rec in conclusion.recomendaciones %}
+                <li class="small mb-2">{{ rec }}</li>
+                {% endfor %}
+            </ol>
+        </div>
+        {% endif %}
+
+    </div><!-- /card-body -->
+</div>
+{% endif %}
+
 <!-- Veredicto final -->
 <div class="row g-3 mb-4">
     <div class="col-md-4">
@@ -128,6 +237,25 @@
         </div>
     </div>
 </div>
+
+{% if team_compliance %}
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm h-100 text-center">
+            <div class="card-body d-flex flex-column align-items-center justify-content-center py-3">
+                <p class="text-muted small mb-2"><i class="bi bi-people me-1"></i>EQUIPO DE TRABAJO</p>
+                {% if team_compliance.cumple_equipo %}
+                    <span class="badge bg-success badge-cumple">CUMPLE</span>
+                    <p class="text-success small mt-2 mb-0">El equipo cumple todos los perfiles requeridos.</p>
+                {% else %}
+                    <span class="badge bg-danger badge-cumple">NO CUMPLE</span>
+                    <p class="text-danger small mt-2 mb-0">Uno o mas perfiles no tienen candidatos que cumplan.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
 
 <!-- Experiencia RUP detail -->
 {% if exp_result %}
@@ -397,6 +525,40 @@
         </div>
         {% endif %}
 
+        {% if ind_result.indicadores_detalle %}
+        <div class="mb-3">
+            <h6 class="text-muted small text-uppercase mb-2">Desglose por indicador</h6>
+            <div class="table-responsive">
+            <table class="table table-sm table-bordered" style="font-size:0.85rem;">
+                <thead class="table-light">
+                    <tr>
+                        <th>Indicador</th>
+                        <th class="text-end">Valor empresa</th>
+                        <th>Condición</th>
+                        <th class="text-end">Umbral</th>
+                        <th class="text-center">Cumple</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for det in ind_result.indicadores_detalle %}
+                <tr>
+                    <td>{{ det.indicador }}</td>
+                    <td class="text-end">{% if det.valor_empresa is not None %}{{ det.valor_empresa|floatformat:4 }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                    <td>{{ det.condicion|default:"—" }}</td>
+                    <td class="text-end">{% if det.umbral is not None %}{{ det.umbral|floatformat:4 }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                    <td class="text-center">
+                        {% if det.cumple == True %}<span class="badge bg-success">SÍ</span>
+                        {% elif det.cumple == False %}<span class="badge bg-danger">NO</span>
+                        {% else %}<span class="badge bg-secondary">—</span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            </div>
+        </div>
+        {% endif %}
+
         <div class="card bg-light border-0">
             <div class="card-body">
                 <h6 class="card-title text-muted small text-uppercase">Argumentacion del LLM</h6>
@@ -431,7 +593,8 @@
                 <i class="bi bi-tag me-1"></i>{{ cat_group.grouper }}
             </h6>
             {% for req in cat_group.list %}
-            <div class="d-flex align-items-start gap-2 mb-2">
+            <div class="mb-2">
+            <div class="d-flex align-items-start gap-2">
                 {% if req.estado == "CUMPLE" %}
                     <span class="badge bg-success flex-shrink-0">CUMPLE</span>
                 {% elif req.estado == "NO_CUMPLE" %}
@@ -441,13 +604,48 @@
                 {% else %}
                     <span class="badge bg-warning text-dark flex-shrink-0">PENDIENTE</span>
                 {% endif %}
-                <span class="small">
+                <span class="small flex-grow-1">
                     {{ req.descripcion }}
+                    {# Badge de confianza #}
+                    {% if req.confidence is not None %}
+                        {% if req.confidence >= 0.8 %}
+                            <span class="badge bg-success ms-1" style="font-size:0.6rem" title="Confianza alta ({{ req.confidence|floatformat:2 }})"><i class="bi bi-shield-check"></i> {% widthratio req.confidence 1 100 %}%</span>
+                        {% elif req.confidence >= 0.5 %}
+                            <span class="badge bg-warning text-dark ms-1" style="font-size:0.6rem" title="Confianza media ({{ req.confidence|floatformat:2 }})"><i class="bi bi-shield-exclamation"></i> {% widthratio req.confidence 1 100 %}%</span>
+                        {% else %}
+                            <span class="badge bg-secondary ms-1" style="font-size:0.6rem" title="Confianza baja ({{ req.confidence|floatformat:2 }})"><i class="bi bi-shield-x"></i> {% widthratio req.confidence 1 100 %}%</span>
+                        {% endif %}
+                    {% endif %}
+                    {# Icono de cita verificada #}
+                    {% if req.citation_verified == True %}
+                        <i class="bi bi-patch-check-fill text-success ms-1" style="font-size:0.75rem" title="Cita verificada en el pliego"></i>
+                    {% elif req.citation_verified == False %}
+                        <i class="bi bi-exclamation-triangle-fill text-warning ms-1" style="font-size:0.75rem" title="Cita no encontrada en el bloque fuente"></i>
+                    {% endif %}
                     {% if req.pagina != "N/A" %}
                         <span class="text-muted ms-1">&bull; Pag. {{ req.pagina }}</span>
                     {% endif %}
                     {% if req.origen == "QA" %}<span class="badge bg-info ms-1" style="font-size:0.65rem">Q&A</span>{% endif %}
+                    {# Botón para expandir detalle #}
+                    {% if req.extracto_pliego or req.seccion != "N/A" or req.documento_formato != "N/A" %}
+                    <button class="btn btn-link p-0 ms-1" type="button" data-bs-toggle="collapse"
+                            data-bs-target="#req-det-{{ req.id }}" style="font-size:0.7rem; vertical-align:baseline; text-decoration:none;">
+                        <i class="bi bi-chevron-down text-muted"></i>
+                    </button>
+                    {% endif %}
                 </span>
+            </div>
+            {# Panel colapsable con extracto, sección y documento requerido #}
+            {% if req.extracto_pliego or req.seccion != "N/A" or req.documento_formato != "N/A" %}
+            <div class="collapse ps-4 mt-1" id="req-det-{{ req.id }}">
+                <div class="border-start border-2 ps-2 py-1" style="font-size:0.8rem; border-color:#dee2e6!important">
+                    {% if req.seccion != "N/A" %}<div><span class="text-muted">Sección:</span> <strong>{{ req.seccion }}</strong></div>{% endif %}
+                    {% if req.documento_formato != "N/A" %}<div><span class="text-muted">Documento requerido:</span> {{ req.documento_formato }}</div>{% endif %}
+                    {% if req.obligatorio != "NO_ESPECIFICADO" %}<div><span class="text-muted">Obligatorio:</span> {{ req.obligatorio }}</div>{% endif %}
+                    {% if req.extracto_pliego %}<div class="mt-1 fst-italic text-secondary">&ldquo;{{ req.extracto_pliego }}&rdquo;</div>{% endif %}
+                </div>
+            </div>
+            {% endif %}
             </div>
             {% endfor %}
         {% endfor %}
@@ -458,6 +656,107 @@
             Editalos en el Paso 2 o descarga el Excel para completarlos offline.
         </div>
         {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Equipo de Trabajo detail -->
+{% if team_compliance %}
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header card-header-tendermod d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-people me-2"></i>Evaluacion de Equipo de Trabajo</h5>
+        {% if team_compliance.cumple_equipo %}
+            <span class="badge bg-success">CUMPLE</span>
+        {% else %}
+            <span class="badge bg-danger">NO CUMPLE</span>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        <div class="accordion" id="accordion-team-results">
+        {% for perfil in team_compliance.perfiles_evaluados %}
+        <div class="accordion-item border mb-2 rounded">
+            <h2 class="accordion-header">
+                <button class="accordion-button {% if not forloop.first %}collapsed{% endif %} rounded"
+                        type="button"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#team-perfil-{{ forloop.counter }}"
+                        aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}">
+                    <div class="d-flex align-items-center gap-2 w-100">
+                        {% if perfil.cumple %}
+                            <span class="badge bg-success flex-shrink-0">CUMPLE</span>
+                        {% else %}
+                            <span class="badge bg-danger flex-shrink-0">NO CUMPLE</span>
+                        {% endif %}
+                        <strong>{{ perfil.rol }}</strong>
+                        <span class="text-muted small ms-auto me-3">
+                            {{ perfil.personas_que_cumplen|length }} / {{ perfil.cantidad_requerida }} candidato{{ perfil.cantidad_requerida|pluralize:"s" }}
+                        </span>
+                    </div>
+                </button>
+            </h2>
+            <div id="team-perfil-{{ forloop.counter }}"
+                 class="accordion-collapse collapse {% if forloop.first %}show{% endif %}">
+                <div class="accordion-body pt-2">
+                    {% if perfil.personas_que_cumplen %}
+                    <div class="mb-3">
+                        <p class="small text-muted mb-1">Personas que cumplen:</p>
+                        {% for nombre in perfil.personas_que_cumplen %}
+                            <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle me-1 mb-1">
+                                <i class="bi bi-person-check me-1"></i>{{ nombre }}
+                            </span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    {% if perfil.personas_evaluadas %}
+                    <table class="table table-sm table-hover small mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Persona</th>
+                                <th>Cargo</th>
+                                <th>Resultado</th>
+                                <th>Justificacion</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for persona in perfil.personas_evaluadas %}
+                        <tr>
+                            <td class="fw-semibold">{{ persona.persona }}</td>
+                            <td class="text-muted">{{ persona.cargo }}</td>
+                            <td>
+                                {% if persona.cumple %}
+                                    <span class="badge bg-success">CUMPLE</span>
+                                {% else %}
+                                    <span class="badge bg-danger">NO CUMPLE</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <p class="mb-1">{{ persona.justificacion }}</p>
+                                {% if persona.evidencia %}
+                                    <ul class="mb-1 ps-3">
+                                    {% for ev in persona.evidencia %}
+                                        <li class="text-success-emphasis"><i class="bi bi-check-circle me-1"></i>{{ ev }}</li>
+                                    {% endfor %}
+                                    </ul>
+                                {% endif %}
+                                {% if persona.gaps %}
+                                    <ul class="mb-0 ps-3">
+                                    {% for gap in persona.gaps %}
+                                        <li class="text-danger-emphasis"><i class="bi bi-x-circle me-1"></i>{{ gap }}</li>
+                                    {% endfor %}
+                                    </ul>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+        </div>
     </div>
 </div>
 {% endif %}

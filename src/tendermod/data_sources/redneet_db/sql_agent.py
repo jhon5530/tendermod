@@ -1,5 +1,3 @@
-from openai import OpenAI
-from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities.sql_database import SQLDatabase
 from langchain_community.agent_toolkits import create_sql_agent
@@ -33,6 +31,14 @@ def build_company_sql_agent():
         agent_type="openai-tools",
         verbose=False,
         top_k=500,
+        prefix=(
+            "Eres un agente SQL que consulta una base de datos SQLite con KPIs financieros "
+            "y experiencia de una empresa colombiana. "
+            "Reglas estrictas: (1) Retorna SOLO valores numéricos o NULL — nunca texto narrativo. "
+            "(2) Nunca inventes columnas ni tablas que no existan en el esquema. "
+            "(3) Los valores monetarios están en COP (pesos colombianos). "
+            "(4) Si una columna no existe, retorna NULL para ese campo."
+        ),
     )
 
     return db_agent

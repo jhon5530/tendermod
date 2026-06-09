@@ -68,6 +68,24 @@ def ingest_documents() -> dict:
 
     chunks = chunk_docs(docs)
 
+    # Enriquecer chunks con chapter_title para mejorar trazabilidad en RAG
+    try:
+        from tendermod.ingestion.chapter_extractor import get_chapter_ranges
+        pdf_files = glob(str(ROOT_DIR / "data" / "*.pdf"))
+        if pdf_files:
+            chapters = get_chapter_ranges(pdf_files[0], use_llm=False)
+            for chunk in chunks:
+                page = chunk.metadata.get("page", -1)
+                for ch in chapters:
+                    if ch["start_page"] <= page < ch["end_page"]:
+                        chunk.metadata["chapter_title"] = ch["title"]
+                        break
+            logger.info(
+                "[ingest_documents] chapter_title asignado vía %d capítulos", len(chapters)
+            )
+    except Exception as exc:
+        logger.warning("[ingest_documents] No se pudo asignar chapter_title: %s", exc)
+
     # Filtro defensivo: eliminar chunks con contenido vacío
     chunks_validos = [c for c in chunks if c.page_content.strip()]
     descartados = len(chunks) - len(chunks_validos)

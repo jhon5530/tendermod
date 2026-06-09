@@ -20,14 +20,15 @@
                     <strong>{{ session.pdf_filename }}</strong>
                 </p>
                 <p class="text-muted mb-4 small">
-                    El sistema esta ejecutando todos los pasos de extraccion y evaluacion de forma automatica.
-                    No cierre esta ventana.
+                    El sistema esta ejecutando todos los pasos en el servidor. Puedes cerrar esta
+                    ventana o navegar a otra pagina: el analisis continuara y podras volver aqui
+                    para ver el progreso y los tiempos.
                 </p>
 
                 <!-- Barra de progreso -->
                 <div class="mb-4">
                     <div class="d-flex justify-content-between mb-1">
-                        <span class="fw-semibold small" id="progress-label">Iniciando...</span>
+                        <span class="fw-semibold small" id="progress-label">Cargando estado...</span>
                         <span class="text-muted small">
                             <i class="bi bi-stopwatch me-1"></i><span id="timer">00:00</span>
                             &nbsp;&nbsp;<span class="fw-semibold" id="progress-pct">0%</span>
@@ -41,36 +42,14 @@
                     </div>
                 </div>
 
-                <!-- Lista de pasos -->
+                <!-- Lista de pasos (renderizada desde AUTO_FLOW_STEPS) -->
                 <ul class="list-group list-group-flush" id="steps-list">
-                    <li class="list-group-item px-0 d-flex align-items-center gap-3" id="step-0">
+                    {% for nombre, label, peso in auto_steps %}
+                    <li class="list-group-item px-0 d-flex align-items-center gap-3" id="step-{{ forloop.counter0 }}">
                         <span class="step-icon text-muted"><i class="bi bi-circle"></i></span>
-                        <span class="step-label text-muted">Ingesta del PDF en base vectorial</span>
+                        <span class="step-label text-muted">{{ label }}</span>
                     </li>
-                    <li class="list-group-item px-0 d-flex align-items-center gap-3" id="step-1">
-                        <span class="step-icon text-muted"><i class="bi bi-circle"></i></span>
-                        <span class="step-label text-muted">Extraccion de requisitos de experiencia</span>
-                    </li>
-                    <li class="list-group-item px-0 d-flex align-items-center gap-3" id="step-2">
-                        <span class="step-icon text-muted"><i class="bi bi-circle"></i></span>
-                        <span class="step-label text-muted">Extraccion de indicadores financieros</span>
-                    </li>
-                    <li class="list-group-item px-0 d-flex align-items-center gap-3" id="step-3">
-                        <span class="step-icon text-muted"><i class="bi bi-circle"></i></span>
-                        <span class="step-label text-muted">Extraccion de informacion general del proceso</span>
-                    </li>
-                    <li class="list-group-item px-0 d-flex align-items-center gap-3" id="step-4">
-                        <span class="step-icon text-muted"><i class="bi bi-circle"></i></span>
-                        <span class="step-label text-muted">Extraccion de requisitos habilitantes</span>
-                    </li>
-                    <li class="list-group-item px-0 d-flex align-items-center gap-3" id="step-5">
-                        <span class="step-icon text-muted"><i class="bi bi-circle"></i></span>
-                        <span class="step-label text-muted">Evaluacion de cumplimiento de experiencia</span>
-                    </li>
-                    <li class="list-group-item px-0 d-flex align-items-center gap-3" id="step-6">
-                        <span class="step-icon text-muted"><i class="bi bi-circle"></i></span>
-                        <span class="step-label text-muted">Evaluacion de indicadores financieros</span>
-                    </li>
+                    {% endfor %}
                 </ul>
 
                 <!-- Botón de resultados (aparece al completar) -->
@@ -78,7 +57,7 @@
                     <p class="text-success fw-semibold mb-3">
                         <i class="bi bi-check-circle-fill me-2"></i>Evaluacion completada
                     </p>
-                    <a id="btn-results" href="#" class="btn btn-success btn-lg px-5">
+                    <a id="btn-results" href="{{ results_url }}" class="btn btn-success btn-lg px-5">
                         <i class="bi bi-bar-chart-line me-2"></i>Ver Resultados
                     </a>
                 </div>
@@ -104,145 +83,108 @@
 
 {% block extra_js %}
 <script>
-var INGEST_TASK_ID = '{{ ingest_task_id }}';
-var RESULTS_URL   = '{{ results_url }}';
-var EXTRACT_URL   = '{{ extract_url }}';
-var AUTO_EXP_URL  = '{{ auto_exp_url }}';
-var AUTO_IND_URL  = '{{ auto_ind_url }}';
-var CSRF_TOKEN    = '{{ csrf_token }}';
-var TASK_STATUS_BASE = '/api/task-status/';
+var PROGRESS_URL = '{{ progress_url }}';
+var RESULTS_URL  = '{{ results_url }}';
+var POLL_MS = 2500;
+var pollInterval = null;
 
-var STEPS = [
-    { id: 'step-0', label: 'Ingesta del PDF en base vectorial',               weight: 15, type: 'poll',   taskId: INGEST_TASK_ID },
-    { id: 'step-1', label: 'Extraccion de requisitos de experiencia',          weight: 15, type: 'launch', url: EXTRACT_URL, body: {action: 'experience'} },
-    { id: 'step-2', label: 'Extraccion de indicadores financieros',            weight: 15, type: 'launch', url: EXTRACT_URL, body: {action: 'indicators'} },
-    { id: 'step-3', label: 'Extraccion de informacion general del proceso',    weight: 10, type: 'launch', url: EXTRACT_URL, body: {action: 'general_info'} },
-    { id: 'step-4', label: 'Extraccion de requisitos habilitantes',            weight: 15, type: 'launch', url: EXTRACT_URL, body: {action: 'general_requirements'} },
-    { id: 'step-5', label: 'Evaluacion de cumplimiento de experiencia',        weight: 15, type: 'launch', url: AUTO_EXP_URL, body: {} },
-    { id: 'step-6', label: 'Evaluacion de indicadores financieros',            weight: 15, type: 'launch', url: AUTO_IND_URL, body: {} },
-];
-
-var totalProgress = 0;
-var timerInterval = null;
-var startTime = null;
-
-function startTimer() {
-    startTime = Date.now();
-    timerInterval = setInterval(function() {
-        var elapsed = Math.floor((Date.now() - startTime) / 1000);
-        var mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
-        var ss = String(elapsed % 60).padStart(2, '0');
-        document.getElementById('timer').textContent = mm + ':' + ss;
-    }, 1000);
+function fmtTimer(totalS) {
+    var elapsed = Math.floor(totalS || 0);
+    var mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    var ss = String(elapsed % 60).padStart(2, '0');
+    return mm + ':' + ss;
 }
 
-function stopTimer() {
-    if (timerInterval) {
-        clearInterval(timerInterval);
-        timerInterval = null;
+function renderStep(idx, step) {
+    var el = document.getElementById('step-' + idx);
+    if (!el) return;
+    var icon = el.querySelector('.step-icon');
+    var lbl = el.querySelector('.step-label');
+
+    // Limpiar clases de estado del label
+    lbl.classList.remove('text-muted', 'text-primary', 'fw-semibold', 'text-success', 'text-danger');
+    // Quitar badge previo si existe
+    var oldBadge = el.querySelector('.step-badge-dur');
+    if (oldBadge) oldBadge.remove();
+
+    if (step.estado === 'ok') {
+        icon.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
+        lbl.classList.add('text-success');
+        if (step.duracion_s !== null && step.duracion_s !== undefined) {
+            var b = document.createElement('span');
+            b.className = 'ms-auto badge bg-light text-secondary border small step-badge-dur';
+            b.textContent = step.duracion_s.toFixed(1) + 's';
+            el.appendChild(b);
+        }
+    } else if (step.estado === 'running') {
+        icon.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
+        lbl.classList.add('text-primary', 'fw-semibold');
+    } else if (step.estado === 'error') {
+        icon.innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
+        lbl.classList.add('text-danger');
+        if (step.duracion_s !== null && step.duracion_s !== undefined) {
+            var be = document.createElement('span');
+            be.className = 'ms-auto badge bg-danger-subtle text-danger border small step-badge-dur';
+            be.textContent = step.duracion_s.toFixed(1) + 's';
+            el.appendChild(be);
+        }
+    } else { // pending
+        icon.innerHTML = '<i class="bi bi-circle text-muted"></i>';
+        lbl.classList.add('text-muted');
     }
 }
 
-function setStepRunning(idx) {
-    var el = document.getElementById(STEPS[idx].id);
-    el.querySelector('.step-icon').innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
-    el.querySelector('.step-label').classList.remove('text-muted');
-    el.querySelector('.step-label').classList.add('text-primary', 'fw-semibold');
-    document.getElementById('progress-label').textContent = STEPS[idx].label + '...';
-}
-
-function setStepDone(idx) {
-    var el = document.getElementById(STEPS[idx].id);
-    el.querySelector('.step-icon').innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
-    el.querySelector('.step-label').classList.remove('text-muted', 'text-primary', 'fw-semibold');
-    el.querySelector('.step-label').classList.add('text-success');
-}
-
-function setStepError(idx, msg) {
-    var el = document.getElementById(STEPS[idx].id);
-    el.querySelector('.step-icon').innerHTML = '<i class="bi bi-x-circle-fill text-danger"></i>';
-    el.querySelector('.step-label').classList.remove('text-muted', 'text-primary', 'fw-semibold');
-    el.querySelector('.step-label').classList.add('text-danger');
-    document.getElementById('global-error').classList.remove('d-none');
-    document.getElementById('global-error-msg').textContent = ' ' + (msg || '');
-}
-
-function updateProgressBar(pct) {
+function updateProgressBar(pct, finished) {
     var bar = document.getElementById('progress-bar');
     bar.style.width = pct + '%';
     document.getElementById('progress-pct').textContent = pct + '%';
-    if (pct >= 100) {
+    if (finished || pct >= 100) {
         bar.classList.remove('progress-bar-animated', 'progress-bar-striped');
     }
 }
 
-function pollTaskId(taskId) {
-    return new Promise(function(resolve, reject) {
-        var interval = setInterval(function() {
-            fetch(TASK_STATUS_BASE + taskId + '/')
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    if (data.status === 'SUCCESS') {
-                        clearInterval(interval);
-                        resolve(data.result);
-                    } else if (data.status === 'FAILURE') {
-                        clearInterval(interval);
-                        reject(new Error(data.error || 'Tarea fallida'));
-                    }
-                })
-                .catch(function(err) {
-                    clearInterval(interval);
-                    reject(err);
-                });
-        }, 2500);
-    });
-}
+function applyProgress(data) {
+    document.getElementById('timer').textContent = fmtTimer(data.total_s);
+    updateProgressBar(data.progreso_pct, data.finished);
 
-function launchAndPoll(url, body) {
-    return fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': CSRF_TOKEN,
-        },
-        body: JSON.stringify(body),
-    })
-    .then(function(r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-    })
-    .then(function(data) {
-        if (!data.task_id) throw new Error('Sin task_id en respuesta');
-        return pollTaskId(data.task_id);
+    var runningLabel = null;
+    data.steps.forEach(function(step, idx) {
+        renderStep(idx, step);
+        if (step.estado === 'running') runningLabel = step.label;
     });
-}
 
-async function runAutoEvaluation() {
-    startTimer();
-    for (var i = 0; i < STEPS.length; i++) {
-        var step = STEPS[i];
-        setStepRunning(i);
-        try {
-            if (step.type === 'poll') {
-                await pollTaskId(step.taskId);
-            } else {
-                await launchAndPoll(step.url, step.body);
-            }
-            totalProgress += step.weight;
-            updateProgressBar(totalProgress);
-            setStepDone(i);
-        } catch (e) {
-            stopTimer();
-            setStepError(i, e.message || '');
-            return;
-        }
+    var lbl = document.getElementById('progress-label');
+    if (data.error) {
+        lbl.textContent = 'Error en la evaluacion';
+        document.getElementById('global-error').classList.remove('d-none');
+        stopPolling();
+    } else if (data.finished) {
+        lbl.textContent = '¡Completado!';
+        document.getElementById('completion-actions').classList.remove('d-none');
+        stopPolling();
+    } else if (runningLabel) {
+        lbl.textContent = runningLabel + '...';
+    } else {
+        lbl.textContent = 'Iniciando...';
     }
-    stopTimer();
-    document.getElementById('progress-label').textContent = '¡Completado!';
-    document.getElementById('btn-results').href = RESULTS_URL;
-    document.getElementById('completion-actions').classList.remove('d-none');
 }
 
-runAutoEvaluation();
+function poll() {
+    fetch(PROGRESS_URL)
+        .then(function(r) { return r.json(); })
+        .then(applyProgress)
+        .catch(function(err) { console.error('Error consultando progreso:', err); });
+}
+
+function stopPolling() {
+    if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+    }
+}
+
+// Primer poll inmediato (reconstruye el estado al cargar/volver), luego periodico
+poll();
+pollInterval = setInterval(poll, POLL_MS);
 </script>
 {% endblock %}

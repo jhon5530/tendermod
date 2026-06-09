@@ -1,8 +1,5 @@
-from tendermod.data_sources.redneet_db.xls_loader import load_db
 from tendermod.evaluation.compare_experience import check_compliance_experience, experience_comparation
 from tendermod.evaluation.compare_indicators import indicators_comparation
-from tendermod.ingestion.ingestion_experience_flow import ingest_experience_data
-from tendermod.ingestion.ingestion_flow import ingest_documents
 
 from dotenv import load_dotenv
 

@@ -8,6 +8,7 @@ class AnalysisSession(models.Model):
         ('pdf_ready', 'PDF listo'),
         ('extracted', 'Requisitos extraidos'),
         ('evaluating', 'Evaluando'),
+        ('auto_running', 'Evaluacion automatica en curso'),
         ('completed', 'Completado'),
         ('error', 'Error'),
     ]
@@ -23,6 +24,12 @@ class AnalysisSession(models.Model):
     general_info_text = models.TextField(blank=True)
     # GeneralRequirementList.model_dump_json()
     general_requirements_json = models.TextField(blank=True, default='')
+    # ProfileRequirementList.model_dump_json()
+    team_profiles_json = models.TextField(blank=True, default='')
+    # Lista JSON de dicts {paso, tarea, duracion_s, estado} — una entrada por tarea Celery ejecutada
+    timing_json = models.TextField(blank=True, default='[]')
+    # True mientras corre el chain de evaluacion automatica (independiente de 'status', que es volatil)
+    auto_flow_active = models.BooleanField(default=False)
     celery_task_id = models.CharField(max_length=255, blank=True)
     ocr_document_path = models.CharField(max_length=500, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -42,6 +49,7 @@ class AnalysisSession(models.Model):
             'pdf_ready': 'info',
             'extracted': 'primary',
             'evaluating': 'warning',
+            'auto_running': 'info',
             'completed': 'success',
             'error': 'danger',
         }
@@ -64,6 +72,11 @@ class AnalysisResult(models.Model):
     # Contexto RAG crudo del retriever usado en cada evaluacion
     indicators_context_text = models.TextField(blank=True, default='')
     experience_context_text = models.TextField(blank=True, default='')
+    # TeamProfileComplianceList.model_dump_json()
+    team_compliance_json = models.TextField(blank=True, default='')
+    cumple_equipo = models.BooleanField(null=True)
+    # EvaluacionConclusionResult.model_dump_json()
+    conclusion_json = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

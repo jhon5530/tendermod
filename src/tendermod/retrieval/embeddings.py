@@ -1,4 +1,3 @@
-from openai import OpenAI
 from tendermod.config.settings import OPENAI_API_KEY
 #from langchain.embeddings import OpenAIEmbeddings
 from langchain_openai import OpenAIEmbeddings

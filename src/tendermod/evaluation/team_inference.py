@@ -1,56 +1,138 @@
-import json
 import logging
+import os
+import sqlite3
+from collections import defaultdict
 
 from langchain_openai import ChatOpenAI
 
-from tendermod.data_sources.redneet_db.team_query_builder import build_and_execute_query
-from tendermod.evaluation.prompts import TEAM_ANSWER_SYSTEM, TEAM_ANSWER_USER
-from tendermod.evaluation.team_intent import parse_team_intent
+from tendermod.config.settings import REDNEET_DB_PERSIST_DIR
+from tendermod.evaluation.prompts import TEAM_CONTEXT_SYSTEM, TEAM_CONTEXT_USER
 
 logger = logging.getLogger(__name__)
 
 
+def _get_cert_columns(conn: sqlite3.Connection) -> tuple[str, str]:
+    """Detecta dinámicamente los nombres de columnas del esquema actual."""
+    info = conn.execute("PRAGMA table_info(certificaciones)").fetchall()
+    cols = {row[1] for row in info}
+    vigencia_col = next((c for c in ("Vigencia", "Vencimiento") if c in cols), None)
+    join_col = "p.Persona" if "Persona" in cols else None
+    return vigencia_col, join_col
+
+
+def _load_all_team_data() -> str:
+    """
+    Carga TODAS las personas y certificaciones como texto estructurado.
+    Incluye formación académica (Titulo_Profesional, Posgrado, Anios_Experiencia).
+    Separa certificaciones vigentes / vencidas para facilitar evaluación de perfiles.
+    """
+    db_path = os.path.join(REDNEET_DB_PERSIST_DIR, "redneet_database.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        vigencia_col, _ = _get_cert_columns(conn)
+        vig_select = f"c.{vigencia_col}" if vigencia_col else "NULL"
+
+        # Detectar columnas de formación disponibles en personas
+        p_cols = {row[1] for row in conn.execute("PRAGMA table_info(personas)").fetchall()}
+        titulo_sel = "p.Titulo_Profesional" if "Titulo_Profesional" in p_cols else "NULL"
+        tecnico_sel = "p.Titulo_Tecnico_Tecnologico" if "Titulo_Tecnico_Tecnologico" in p_cols else "NULL"
+        posgrado_sel = "p.Posgrado" if "Posgrado" in p_cols else "NULL"
+        anios_sel = "p.Anios_Experiencia" if "Anios_Experiencia" in p_cols else "NULL"
+
+        rows = conn.execute(
+            f"SELECT p.Persona, p.Cargo, "
+            f"{titulo_sel} as Titulo_Profesional, "
+            f"{tecnico_sel} as Titulo_Tecnico_Tecnologico, "
+            f"{posgrado_sel} as Posgrado, "
+            f"{anios_sel} as Anios_Experiencia, "
+            f"c.Categoria, c.Certificacion, {vig_select} as Vigencia "
+            "FROM personas p "
+            "LEFT JOIN certificaciones c ON p.Persona = c.Persona "
+            "ORDER BY p.Persona, c.Categoria, c.Certificacion"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    personas: dict[str, dict] = defaultdict(lambda: {
+        "cargo": "", "titulo": None, "tecnico": None,
+        "posgrado": None, "anios": None,
+        "vigentes": [], "vencidas": [],
+    })
+
+    for r in rows:
+        p = personas[r["Persona"]]
+        p["cargo"] = r["Cargo"] or ""
+        if p["titulo"] is None:
+            p["titulo"] = r["Titulo_Profesional"]
+            p["tecnico"] = r["Titulo_Tecnico_Tecnologico"]
+            p["posgrado"] = r["Posgrado"]
+            p["anios"] = r["Anios_Experiencia"]
+        if r["Certificacion"]:
+            entry = f'{r["Certificacion"]} [{r["Categoria"]}]'
+            vig = (r["Vigencia"] or "").strip()
+            if vig.lower() == "vencida":
+                p["vencidas"].append(entry)
+            else:
+                p["vigentes"].append(entry)
+
+    total_vigentes = sum(len(d["vigentes"]) for d in personas.values())
+    total_vencidas = sum(len(d["vencidas"]) for d in personas.values())
+    lines: list[str] = [
+        f"RESUMEN: {len(personas)} personas en el equipo, "
+        f"{total_vigentes} certs vigentes, {total_vencidas} certs vencidas.",
+        "",
+    ]
+    for nombre, data in sorted(personas.items()):
+        anios_str = f" | AÑOS EXP: {data['anios']}" if data["anios"] is not None else ""
+        lines.append(f"PERSONA: {nombre} | CARGO: {data['cargo']}{anios_str}")
+        lines.append(f"  FORMACIÓN PROFESIONAL: {data['titulo'] or '(sin datos)'}")
+        if data["tecnico"]:
+            lines.append(f"  FORMACIÓN TÉCNICA: {data['tecnico']}")
+        lines.append(f"  POSGRADO: {data['posgrado'] or '(sin datos)'}")
+        if data["vigentes"]:
+            lines.append(f"  CERTIFICACIONES VIGENTES ({len(data['vigentes'])}):")
+            for cert in data["vigentes"]:
+                lines.append(f"    - {cert}")
+        else:
+            lines.append("  CERTIFICACIONES VIGENTES: (ninguna)")
+        if data["vencidas"]:
+            lines.append(f"  CERTIFICACIONES VENCIDAS ({len(data['vencidas'])}):")
+            for cert in data["vencidas"]:
+                lines.append(f"    - {cert}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def ask_team(question: str, chat_history: list[dict] | None = None) -> str:
     """
-    Pipeline determinístico de 3 pasos para consultas sobre el equipo:
-    1. LLM parsea la intención → TeamQuery (structured output, sin alucinaciones SQL)
-    2. QueryBuilder Python genera SQL parametrizado → ejecuta en SQLite
-    3. LLM redacta la respuesta en lenguaje natural a partir de datos reales
+    Pipeline Full-Context: carga TODOS los datos del equipo (350 registros, ~17K tokens)
+    y deja que el LLM razone directamente sobre el dataset completo.
 
-    chat_history: lista de dicts [{"role": "user"|"assistant", "content": "..."}]
-    con los últimos N mensajes de la conversación para contexto.
+    Elimina el intent parser + SQL builder — sin JOINs, sin esquemas de intención,
+    sin ambigüedad en qué alias mostrar. El LLM ve todos los datos y aplica la lógica
+    correcta para cualquier tipo de consulta (AND, OR, conteo, filtrado por vigencia, etc.).
     """
     history = chat_history or []
 
-    # Paso 1: augmentar la pregunta con contexto reciente para el intent parser
-    question_for_intent = question
-    if history:
-        recent = history[-6:]  # últimos 3 turnos
-        context_lines = "\n".join(
-            f"- {'Usuario' if m['role'] == 'user' else 'Asistente'}: {m['content']}"
-            for m in recent
-        )
-        question_for_intent = (
-            f"Contexto reciente de la conversacion:\n{context_lines}\n\nPregunta actual: {question}"
-        )
-    intent = parse_team_intent(question_for_intent)
+    try:
+        team_data = _load_all_team_data()
+    except Exception as exc:
+        logger.error("[team_inference] Error cargando datos del equipo: %s", exc)
+        return "No se pudieron cargar los datos del equipo. Verifique que el Excel esté cargado."
 
-    # Paso 2: ejecutar query determinístico
-    rows, sql = build_and_execute_query(intent)
-    logger.info("[team_inference] Pregunta=%r | SQL=%s | filas=%d", question, sql, len(rows))
-
-    # Paso 3: redactar respuesta incluyendo historial completo como contexto
-    results_text = json.dumps(rows, ensure_ascii=False, indent=2) if rows else "[]"
-    llm = ChatOpenAI(temperature=0.2, model_name="gpt-4o-mini")
+    llm = ChatOpenAI(temperature=0.1, model_name="gpt-4o-mini")
     messages = [
-        {"role": "system", "content": TEAM_ANSWER_SYSTEM},
-        *history[-10:],  # últimos 10 mensajes (5 turnos) como contexto
-        {"role": "user", "content": TEAM_ANSWER_USER.format(
+        {"role": "system", "content": TEAM_CONTEXT_SYSTEM},
+        *history[-10:],
+        {"role": "user", "content": TEAM_CONTEXT_USER.format(
+            team_data=team_data,
             question=question,
-            results=results_text,
         )},
     ]
+
     response = llm.invoke(messages)
     answer = response.content.strip()
-    logger.info("[team_inference] Respuesta: %s", answer[:200])
+    logger.info("[team_inference] Pregunta=%r | Respuesta: %s", question, answer[:200])
     return answer

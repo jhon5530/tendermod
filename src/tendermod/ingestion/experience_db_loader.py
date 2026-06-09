@@ -12,7 +12,6 @@ Crea "chunks" (1 por registro) desde SQLite, usando solo:
 Salida: JSONL (un objeto JSON por línea), listo para alimentar un RAG.
 """
 
-import argparse
 import json
 import re
 import sqlite3

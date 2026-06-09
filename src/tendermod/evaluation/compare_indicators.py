@@ -8,9 +8,16 @@ from tendermod.ingestion.db_loader import get_specific_gold_indicator
 
 
 def extract_compliance_bool(text: str) -> Optional[bool]:
-    if re.search(r'\bNo cumple\b', text, re.IGNORECASE):
+    no_cumple = bool(re.search(r'\bNo cumple\b', text, re.IGNORECASE))
+    cumple = bool(re.search(r'\bCumple\b', text, re.IGNORECASE))
+    # "Cumple parcialmente" u otras variantes ambiguas → no se puede determinar
+    cumple_ambiguo = bool(re.search(
+        r'\bCumple\s+(parcialmente|con\s+observaciones|con\s+excepciones|con\s+dudas|con\s+condiciones)\b',
+        text, re.IGNORECASE
+    ))
+    if no_cumple:
         return False
-    if re.search(r'\bCumple\b', text, re.IGNORECASE):
+    if cumple and not cumple_ambiguo:
         return True
     return None
 
@@ -142,6 +149,14 @@ def merge_indicators(tender_indicators_json: dict, gold_indicators_str: str,
         valor_empresa = gold_map.get(nombre)
         if valor_empresa is None:
             valor_empresa = gold_map_norm.get(_normalize_indicator_name(nombre))
+        if valor_empresa is None:
+            # Fallback: match parcial — "liquidez" contenido en "indice de liquidez"
+            # Solo matchear si el valor en el mapa es no-None (evitar retornar null de claves vacías).
+            norm_nombre = _normalize_indicator_name(nombre)
+            for k, v in gold_map_norm.items():
+                if v is not None and (norm_nombre in k or k in norm_nombre):
+                    valor_empresa = v
+                    break
 
         resultado.append({
             "indicador": nombre,
@@ -240,7 +255,7 @@ def from_indicator_schema_to_simple_json(tender_indicators):
 
 """EJEMPLOS PARA NO OLVIDAR"""
 
-u2ser_input = f"""
+u2ser_input = """
         Busca información específica sobre:
         - índice de liquidez
         - endeudamiento

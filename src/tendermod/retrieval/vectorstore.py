@@ -3,7 +3,6 @@ from langchain_chroma import Chroma
 from chromadb.api.shared_system_client import SharedSystemClient
 import shutil
 from pathlib import Path
-from dotenv import load_dotenv
 
 
 def create_vectorstore(document_chunks, embeddings, path=CHROMA_PERSIST_DIR):

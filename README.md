@@ -39,17 +39,11 @@ Actividades ejecutadas
          - Estudios academicos (rama de la ingenieria, especializacion, si es o no Afin)
          - Certificaciones
          - Requerimiento literal
+- (29-05-26) Correcciones varias, adicion de modulo de concluiones, creacion de Gold-set
+
 Proximos pasos
-- Validar la auditoria y en base a esto realizar mejoras a la extraccion.
-- Mejorar la evaluacion del equipo de trabajo y adicionar un modulo de extraccion de equipo basado en los requisitos generales para evaluar el equipo.
+- ok, en pruebas Actualizar la informacion de las bases de datos (Indicadores y experiencia estan desactualizados)
+- Realizar un Goldset (En proceso en Claude)
+- Reevaluar con elpliego de invima y ver si aprueba corretamente los indicadores y si encuentra que el contrato relevante a nivel de relacion de objeto es la UT (Si no revisar)
    
-- Validar Fase 3 (Cargar mas archivos):
-   - Generar una version 1 de una interfaz grafica que permita:
-      - Cargar los archivos de la licitacion
-      - Ejecutar el agente para que interpreta y devuelva los resultados esperados.
 
-
-Mejoras
- - Quizas es buena idea hacer al menos 3 consultas y de las 3 escoger la respuesta que mas probabilidades o repeticiones tenga, debido a que no siempre da la misma respuesta.
- - Cambiar el modo de comparacion de indicadores para que la comparacion se haga punto por punto y no en prosa (ver chat GPT), esto mejorara el resultado que aveces da resultados inesperados
- - Mejorar uso de tokens no ingestando siempre

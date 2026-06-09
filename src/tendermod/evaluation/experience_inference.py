@@ -74,6 +74,12 @@ def get_experience(user_input: str, k: int):
                     "[get_experience] Modo=%s, sub_requisitos=%d, codigos=%d",
                     result.modo_evaluacion, len(result.sub_requisitos), len(result.listado_codigos),
                 )
+                if not result.listado_codigos:
+                    logger.warning(
+                        "[get_experience] listado_codigos vacío tras extracción. "
+                        "Primeros 300 chars del contexto enviado: %s",
+                        combined_text[:300].replace("\n", " "),
+                    )
                 return result, combined_text
 
     except Exception as exc:

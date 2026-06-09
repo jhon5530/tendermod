@@ -176,9 +176,11 @@ ENV=local
 - En `tasks.py`, `general_info` se obtiene ANTES de `merge_indicators` para poder resolver umbrales POE-relativos.
 
 ### Extraccion de requisitos generales (general_requirements_inference.py)
-- Flujo por capitulos completos (sin RAG): detecta capitulos via TOC nativo → LLM → heuristica.
-- `filter_relevant_chapters()`: filtra por keywords en el titulo (`REQUIREMENT_KEYWORDS` en `chapter_extractor.py`).
+- Flujo por capitulos completos (sin RAG): detecta capitulos via TOC nativo → LLM → visual tipografico.
+- **Sin filtro de keywords**: se procesan TODOS los capitulos detectados (no solo los que matchean keywords). Esto garantiza cobertura total del documento.
+- `_build_blocks()`: fusiona capitulos consecutivos en bloques de ≤20K chars sin cortar a mitad de seccion. Para un PDF tipico de 55 pags: 51 capitulos → 12 bloques → 12 llamadas LLM en paralelo.
 - `_MAX_BLOCK_CHARS = 20_000`: limite critico. Con bloques mas grandes (>40K), gpt-4o-mini pierde atencion en sub-componentes de puntaje dentro de tablas ("lost in the middle"). Reducir este valor mejora la granularidad de extraccion de criterios PUNTUABLES con puntaje propio por componente.
+- `_COVERAGE_THRESHOLD = 0.95` en `chapter_extractor.py`: si el LLM solo cubre <95% del documento, complementa con deteccion visual para el resto.
 - Regla de granularidad en el prompt: cada componente con puntaje propio (en tabla o lista) se extrae como item PUNTUABLE independiente, usando la seccion padre.
 
 ### Codigos UNSPSC (compare_experience.py)

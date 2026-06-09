@@ -43,10 +43,10 @@ def _build_multi_filter_sql(
         params: list = []
 
         if cert_terms:
-            conditions.append("c.Certificacion LIKE ?")
+            conditions.append("LOWER(c.Certificacion) LIKE LOWER(?)")
             params.append(f"%{cert_terms[0]}%")
         if cat_terms:
-            conditions.append("c.Categoria LIKE ?")
+            conditions.append("LOWER(c.Categoria) LIKE LOWER(?)")
             params.append(f"%{cat_terms[0]}%")
 
         if intent.filter_persona:
@@ -80,11 +80,11 @@ def _build_multi_filter_sql(
     params = []
 
     for alias, term in zip(cert_aliases, cert_terms):
-        conditions.append(f"{alias}.Certificacion LIKE ?")
+        conditions.append(f"LOWER({alias}.Certificacion) LIKE LOWER(?)")
         params.append(f"%{term}%")
 
     for alias, term in zip(cat_aliases, cat_terms):
-        conditions.append(f"{alias}.Categoria LIKE ?")
+        conditions.append(f"LOWER({alias}.Categoria) LIKE LOWER(?)")
         params.append(f"%{term}%")
 
     if intent.filter_persona:
@@ -132,21 +132,34 @@ def build_and_execute_query(intent: TeamQuery) -> tuple[list[dict], str]:
             sql = f"SELECT COUNT({distinct}{alias}.Persona) as total FROM {from_clause} {where}"
 
     elif intent.action == "detail":
-        distinct = "DISTINCT " if multi else ""
-        sql = (
-            f"SELECT {distinct}{alias}.Persona, {alias}.Cargo, {alias}.Categoria, "
-            f"{alias}.Certificacion, {alias}.Descripcion, {alias}.Fecha_Expedicion, "
-            f"{alias}.Fecha_Expiracion, {alias}.Vencimiento "
-            f"FROM {from_clause} {where} ORDER BY {alias}.Persona, {alias}.Certificacion"
-        )
+        if multi:
+            # Multi-cert: el JOIN ya garantiza que estas personas tienen TODAS las certs buscadas.
+            # Mostrar solo Persona+Cargo para no confundir al LLM con datos de un solo alias.
+            sql = (
+                f"SELECT DISTINCT {alias}.Persona, {alias}.Cargo "
+                f"FROM {from_clause} {where} ORDER BY {alias}.Persona"
+            )
+        else:
+            sql = (
+                f"SELECT {alias}.Persona, {alias}.Cargo, {alias}.Categoria, "
+                f"{alias}.Certificacion, {alias}.Descripcion, {alias}.Fecha_Expedicion, "
+                f"{alias}.Fecha_Expiracion, {alias}.Vencimiento "
+                f"FROM {from_clause} {where} ORDER BY {alias}.Persona, {alias}.Certificacion"
+            )
 
     else:  # list (default)
-        distinct = "DISTINCT " if multi else ""
-        sql = (
-            f"SELECT {distinct}{alias}.Persona, {alias}.Cargo, {alias}.Certificacion, "
-            f"{alias}.Categoria, {alias}.Vencimiento "
-            f"FROM {from_clause} {where} ORDER BY {alias}.Persona, {alias}.Certificacion"
-        )
+        if multi:
+            # Multi-cert: mostrar solo personas distintas. El JOIN garantiza que cumplen TODOS los criterios.
+            sql = (
+                f"SELECT DISTINCT {alias}.Persona, {alias}.Cargo "
+                f"FROM {from_clause} {where} ORDER BY {alias}.Persona"
+            )
+        else:
+            sql = (
+                f"SELECT {alias}.Persona, {alias}.Cargo, {alias}.Certificacion, "
+                f"{alias}.Categoria, {alias}.Vencimiento "
+                f"FROM {from_clause} {where} ORDER BY {alias}.Persona, {alias}.Certificacion"
+            )
 
     db_path = os.path.join(REDNEET_DB_PERSIST_DIR, "redneet_database.db")
     conn = sqlite3.connect(db_path)

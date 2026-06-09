@@ -2,7 +2,6 @@ import glob
 import json
 import logging
 import os
-import shutil
 
 from django.conf import settings
 from django.contrib import messages
@@ -19,11 +18,31 @@ from .tasks import (
     extract_indicators_task,
     extract_general_info_task,
     extract_general_requirements_task,
+    extract_team_profiles_task,
     evaluate_experience_task,
     evaluate_indicators_task,
+    evaluate_team_profiles_task,
+    generate_conclusion_task,
+    finalize_auto_flow_task,
+    mark_auto_error_task,
     quick_evaluate_experience_task,
     quick_evaluate_indicators_task,
 )
+
+# Lista canonica de pasos del flujo automatico: (nombre_en_timing, label_UI, peso).
+# El nombre debe coincidir EXACTO con el usado en _record_timing de cada tarea.
+AUTO_FLOW_STEPS = [
+    ('Ingesta del PDF', 'Ingesta del PDF en base vectorial', 10),
+    ('Extraccion de experiencia RUP', 'Extraccion de requisitos de experiencia', 10),
+    ('Extraccion de indicadores financieros', 'Extraccion de indicadores financieros', 10),
+    ('Extraccion de informacion general', 'Extraccion de informacion general del proceso', 6),
+    ('Extraccion de requisitos habilitantes', 'Extraccion de requisitos habilitantes', 10),
+    ('Extraccion de perfiles de equipo de trabajo', 'Extraccion de perfiles de equipo de trabajo', 10),
+    ('Evaluacion de cumplimiento de experiencia', 'Evaluacion de cumplimiento de experiencia', 11),
+    ('Evaluacion de indicadores financieros', 'Evaluacion de indicadores financieros', 11),
+    ('Evaluacion de equipo de trabajo', 'Evaluacion de equipo de trabajo', 12),
+    ('Generacion de conclusion ejecutiva', 'Generacion de conclusion ejecutiva', 10),
+]
 
 logger = logging.getLogger(__name__)
 
@@ -67,20 +86,46 @@ def analysis_new(request):
                 messages.error(request, f'Error al guardar el PDF: {exc}')
                 return render(request, 'analysis/new.html', {'form': form})
 
-            # Crear sesion y lanzar tarea de ingesta
+            # Crear sesion
             session = AnalysisSession.objects.create(
                 pdf_filename=pdf_filename,
                 status='created',
             )
+
+            action = request.POST.get('action', 'manual')
+            if action == 'auto':
+                # Flujo automatico: encadenar TODAS las tareas en el backend (chain).
+                # El navegador deja de orquestar; solo observa el progreso via auto_progress.
+                from celery import chain
+                sid = session.pk
+                session.timing_json = '[]'  # reset de corridas previas
+                session.status = 'auto_running'
+                session.auto_flow_active = True
+                session.save(update_fields=['timing_json', 'status', 'auto_flow_active', 'updated_at'])
+                flow = chain(
+                    ingest_pdf_task.si(sid),
+                    extract_experience_task.si(sid),
+                    extract_indicators_task.si(sid),
+                    extract_general_info_task.si(sid),
+                    extract_general_requirements_task.si(sid),
+                    extract_team_profiles_task.si(sid),
+                    evaluate_experience_task.si(sid, None, None, False),
+                    evaluate_indicators_task.si(sid, None, False),
+                    evaluate_team_profiles_task.si(sid),
+                    generate_conclusion_task.si(sid),
+                    finalize_auto_flow_task.si(sid),
+                )
+                async_result = flow.apply_async(link_error=mark_auto_error_task.s(sid))
+                session.celery_task_id = async_result.id
+                session.save(update_fields=['celery_task_id', 'updated_at'])
+                logger.info('Sesion %s creada, chain automatico %s lanzado', sid, async_result.id)
+                return redirect('analysis:analysis_auto', pk=session.pk)
+
+            # Flujo manual: solo ingesta, el usuario avanza paso a paso
             task = ingest_pdf_task.delay(session.pk)
             session.celery_task_id = task.id
             session.save(update_fields=['celery_task_id', 'updated_at'])
-
             logger.info('Sesion %s creada, tarea de ingesta %s lanzada', session.pk, task.id)
-            action = request.POST.get('action', 'manual')
-            if action == 'auto':
-                auto_url = reverse('analysis:analysis_auto', kwargs={'pk': session.pk})
-                return redirect(f'{auto_url}?ingest_task={task.id}')
             return redirect('analysis:step1', pk=session.pk)
         else:
             messages.error(request, 'Formulario invalido: ' + str(form.errors))
@@ -102,6 +147,7 @@ def analysis_step1(request, pk):
         'has_indicators': bool(session.indicators_requirements_json),
         'has_general_info': bool(session.general_info_text),
         'has_general_requirements': bool(session.general_requirements_json),
+        'has_team_profiles': bool(session.team_profiles_json),
     }
     return render(request, 'analysis/step1.html', context)
 
@@ -129,6 +175,8 @@ def analysis_extract(request, pk):
         task = extract_general_info_task.delay(session.pk)
     elif action == 'general_requirements':
         task = extract_general_requirements_task.delay(session.pk)
+    elif action == 'team_profiles':
+        task = extract_team_profiles_task.delay(session.pk)
     else:
         return JsonResponse({'error': f'Accion desconocida: {action}'}, status=400)
 
@@ -205,6 +253,26 @@ def analysis_step2(request, pk):
         except Exception as exc:
             logger.error('Error parseando ExperienceResponse para step2: %s', exc)
 
+    team_profiles = []
+    if session.team_profiles_json:
+        try:
+            from tendermod.evaluation.schemas import ProfileRequirementList
+            tp = ProfileRequirementList.model_validate_json(session.team_profiles_json)
+            team_profiles = tp.perfiles
+        except Exception as exc:
+            logger.error('Error parseando team_profiles_json en step2: %s', exc)
+
+    team_compliance = None
+    try:
+        result_obj = session.result
+        if result_obj and result_obj.team_compliance_json:
+            from tendermod.evaluation.schemas import TeamProfileComplianceList
+            team_compliance = TeamProfileComplianceList.model_validate_json(result_obj.team_compliance_json)
+    except AnalysisResult.DoesNotExist:
+        pass
+    except Exception as exc:
+        logger.error('Error parseando team_compliance_json en step2: %s', exc)
+
     context = {
         'session': session,
         'exp_form': exp_form,
@@ -215,6 +283,8 @@ def analysis_step2(request, pk):
         'exp_data': exp_data,
         'general_requirements': general_requirements,
         'req_count': len(general_requirements),
+        'team_profiles': team_profiles,
+        'team_compliance': team_compliance,
     }
     return render(request, 'analysis/step2.html', context)
 
@@ -252,6 +322,9 @@ def analysis_evaluate(request, pk):
     elif action == 'indicators':
         ind_list = body.get('indicators_list', [])
         task = evaluate_indicators_task.delay(session.pk, ind_list)
+
+    elif action == 'team_profiles':
+        task = evaluate_team_profiles_task.delay(session.pk)
 
     else:
         return JsonResponse({'error': f'Accion desconocida: {action}'}, status=400)
@@ -303,12 +376,30 @@ def analysis_results(request, pk):
         except Exception as exc:
             logger.error('Error parseando general_requirements_json en results: %s', exc)
 
+    team_compliance = None
+    if result and result.team_compliance_json:
+        try:
+            from tendermod.evaluation.schemas import TeamProfileComplianceList
+            team_compliance = TeamProfileComplianceList.model_validate_json(result.team_compliance_json)
+        except Exception as exc:
+            logger.error('Error parseando team_compliance_json en results: %s', exc)
+
+    conclusion = None
+    if result and result.conclusion_json:
+        try:
+            from tendermod.evaluation.schemas import EvaluacionConclusionResult
+            conclusion = EvaluacionConclusionResult.model_validate_json(result.conclusion_json)
+        except Exception as exc:
+            logger.error('Error parseando conclusion_json en results: %s', exc)
+
     context = {
         'session': session,
         'result': result,
         'general_requirements': general_requirements,
         'exp_result': exp_result,
         'ind_result': ind_result,
+        'team_compliance': team_compliance,
+        'conclusion': conclusion,
     }
     return render(request, 'analysis/results.html', context)
 
@@ -410,7 +501,7 @@ def analysis_pliego_qa(request, pk):
 def export_excel(request, pk):
     """
     Exporta los resultados de la sesion como archivo Excel (.xlsx).
-    Hoja 1: Indicadores | Hoja 2: Experiencia RUP
+    Hoja 1: Indicadores | Hoja 2: Experiencia RUP | Hoja 3: Checklist General | Hoja 4: Equipo de Trabajo
     """
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment
@@ -605,7 +696,6 @@ def export_excel(request, pk):
     if session.general_requirements_json:
         try:
             from tendermod.evaluation.schemas import GeneralRequirementList
-            from django.conf import settings as _dj_settings
             import urllib.parse as _urlparse
             _pdf_link = _urlparse.quote(session.pdf_filename or '', safe='')
             gr = GeneralRequirementList.model_validate_json(session.general_requirements_json)
@@ -615,7 +705,7 @@ def export_excel(request, pk):
                 cl_headers = [
                     '#', 'Categoria', 'Tipo', 'Descripcion', 'Extracto Pliego',
                     'Documento/Formato', 'Obligatorio', 'Seccion', 'Pagina',
-                    'Estado', 'Nota', 'Origen',
+                    'Estado', 'Nota', 'Origen', 'Confianza', 'Cita Verificada',
                 ]
                 for col_num, header in enumerate(cl_headers, 1):
                     cell = ws_cl.cell(row=1, column=col_num, value=header)
@@ -636,20 +726,23 @@ def export_excel(request, pk):
 
                 for req in gr.requisitos:
                     row_num = ws_cl.max_row + 1
+                    confidence_pct = f"{req.confidence * 100:.0f}%" if req.confidence is not None else ""
+                    citation_label = {True: "Verificada", False: "No encontrada", None: ""}.get(req.citation_verified, "")
                     ws_cl.append([
                         req.id, req.categoria, req.tipo, req.descripcion,
                         (req.extracto_pliego or '')[:600],
                         req.documento_formato, req.obligatorio, req.seccion,
                         req.pagina, req.estado, getattr(req, 'nota', ''), req.origen,
+                        confidence_pct, citation_label,
                     ])
                     fill = tipo_fills.get(req.tipo)
                     if fill:
-                        for col in range(1, 13):
+                        for col in range(1, 15):
                             ws_cl.cell(row=row_num, column=col).fill = fill
                     # Categoría EXPERIENCIA tiene color propio (naranja) que sobrescribe el tipo
                     if req.categoria == 'EXPERIENCIA':
                         exp_fill = PatternFill('solid', fgColor='FFE4B5')
-                        for col in range(1, 13):
+                        for col in range(1, 15):
                             ws_cl.cell(row=row_num, column=col).fill = exp_fill
                     # Hipervínculo en columna Pagina (col 9) → abre PDF en la página indicada
                     try:
@@ -667,6 +760,208 @@ def export_excel(request, pk):
                 _apply_table_format(ws_cl, "CLTable")
         except Exception as exc:
             logger.warning('No se pudo generar hoja Checklist General: %s', exc)
+
+    # ---- Hoja: Equipo de Trabajo ----
+    if result.team_compliance_json:
+        try:
+            from tendermod.evaluation.schemas import TeamProfileComplianceList
+            team = TeamProfileComplianceList.model_validate_json(result.team_compliance_json)
+            if team.perfiles_evaluados:
+                ws_team = wb.create_sheet('Equipo de Trabajo')
+
+                team_headers = [
+                    'Rol', 'Requeridos', 'Persona', 'Cargo',
+                    'Cumple Persona', 'Justificacion', 'Evidencia', 'Gaps',
+                ]
+                for col_num, header in enumerate(team_headers, 1):
+                    cell = ws_team.cell(row=1, column=col_num, value=header)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = Alignment(horizontal='center')
+
+                fill_ok  = PatternFill('solid', fgColor='C6EFCE')
+                fill_no  = PatternFill('solid', fgColor='FFC7CE')
+                fill_rol = PatternFill('solid', fgColor='2E4057')
+                font_rol = Font(bold=True, color='FFFFFF')
+
+                for perfil in team.perfiles_evaluados:
+                    # Fila separadora por perfil
+                    sep_row = ws_team.max_row + 1
+                    candidatos_txt = (
+                        ', '.join(perfil.personas_que_cumplen)
+                        if perfil.personas_que_cumplen else '—'
+                    )
+                    resultado_perfil = 'CUMPLE' if perfil.cumple else 'NO CUMPLE'
+                    ws_team.cell(row=sep_row, column=1, value=perfil.rol)
+                    ws_team.cell(row=sep_row, column=2, value=perfil.cantidad_requerida)
+                    ws_team.cell(row=sep_row, column=5, value=resultado_perfil)
+                    ws_team.cell(row=sep_row, column=6, value=f'Candidatos aptos: {candidatos_txt}')
+                    for c in range(1, len(team_headers) + 1):
+                        ws_team.cell(row=sep_row, column=c).fill = fill_rol
+                        ws_team.cell(row=sep_row, column=c).font = font_rol
+
+                    # Una fila por persona evaluada
+                    for persona in perfil.personas_evaluadas:
+                        row_num = ws_team.max_row + 1
+                        ws_team.append([
+                            perfil.rol,
+                            perfil.cantidad_requerida,
+                            persona.persona,
+                            persona.cargo,
+                            'SI' if persona.cumple else 'NO',
+                            persona.justificacion,
+                            '; '.join(persona.evidencia) if persona.evidencia else '',
+                            '; '.join(persona.gaps) if persona.gaps else '',
+                        ])
+                        row_fill = fill_ok if persona.cumple else fill_no
+                        for c in range(1, len(team_headers) + 1):
+                            ws_team.cell(row=row_num, column=c).fill = row_fill
+
+                # Fila de conclusión final
+                concl_row = ws_team.max_row + 1
+                cumple_equipo_str = 'CUMPLE' if team.cumple_equipo else 'NO CUMPLE'
+                ws_team.append(['CONCLUSION FINAL', '', '', '', cumple_equipo_str, '', '', ''])
+                concl_fill = fill_ok if team.cumple_equipo else fill_no
+                concl_font = Font(bold=True)
+                for c in range(1, len(team_headers) + 1):
+                    ws_team.cell(row=concl_row, column=c).fill = concl_fill
+                    ws_team.cell(row=concl_row, column=c).font = concl_font
+
+                for col in ws_team.columns:
+                    max_len = max((len(str(cell.value or '')) for cell in col), default=10)
+                    ws_team.column_dimensions[col[0].column_letter].width = min(max_len + 4, 60)
+                for row in ws_team.iter_rows(min_row=2):
+                    for cell in row:
+                        cell.alignment = Alignment(wrap_text=True, vertical='top')
+
+        except Exception as exc:
+            logger.warning('No se pudo generar hoja Equipo de Trabajo: %s', exc)
+
+    # ---- Hoja: Conclusion Ejecutiva ----
+    if result.conclusion_json:
+        try:
+            from tendermod.evaluation.schemas import EvaluacionConclusionResult
+            concl = EvaluacionConclusionResult.model_validate_json(result.conclusion_json)
+            ws_concl = wb.create_sheet('Conclusion Ejecutiva')
+
+            # Título
+            ws_concl.cell(row=1, column=1, value='CONCLUSION EJECUTIVA').font = Font(bold=True, size=14, color='FFFFFF')
+            ws_concl.cell(row=1, column=1).fill = PatternFill('solid', fgColor='1F4E79')
+            ws_concl.merge_cells('A1:D1')
+
+            # Veredicto general
+            ws_concl.cell(row=3, column=1, value='VEREDICTO GENERAL').font = Font(bold=True, color='FFFFFF')
+            ws_concl.cell(row=3, column=1).fill = PatternFill('solid', fgColor='2E4057')
+            ws_concl.merge_cells('A3:D3')
+            ws_concl.cell(row=4, column=1, value=concl.veredicto_general)
+            ws_concl.cell(row=4, column=1).alignment = Alignment(wrap_text=True)
+            ws_concl.merge_cells('A4:D4')
+            ws_concl.row_dimensions[4].height = 90
+
+            # RUPs recomendados
+            if concl.rups_recomendados:
+                r = ws_concl.max_row + 2
+                ws_concl.cell(row=r, column=1, value='CONTRATOS RUP A PRESENTAR').font = Font(bold=True, color='FFFFFF')
+                ws_concl.cell(row=r, column=1).fill = PatternFill('solid', fgColor='375623')
+                ws_concl.merge_cells(f'A{r}:D{r}')
+                r += 1
+                for hdr, col in [('N° RUP', 1), ('Cliente', 2), ('Valor COP', 3), ('Relevancia', 4)]:
+                    c = ws_concl.cell(row=r, column=col, value=hdr)
+                    c.font = header_font
+                    c.fill = header_fill
+                r += 1
+                for rup in concl.rups_recomendados:
+                    val_str = f'${int(round(rup.valor_cop)):,}'.replace(',', '.') if rup.valor_cop else ''
+                    ws_concl.append([str(rup.numero_rup), rup.cliente or '', val_str, rup.relevancia])
+                    for col in range(1, 5):
+                        ws_concl.cell(row=ws_concl.max_row, column=col).alignment = Alignment(wrap_text=True)
+
+            # Equipo recomendado
+            if concl.personas_recomendadas:
+                r = ws_concl.max_row + 2
+                ws_concl.cell(row=r, column=1, value='EQUIPO RECOMENDADO').font = Font(bold=True, color='FFFFFF')
+                ws_concl.cell(row=r, column=1).fill = PatternFill('solid', fgColor='7B3F00')
+                ws_concl.merge_cells(f'A{r}:D{r}')
+                r += 1
+                for hdr, col in [('Perfil Requerido', 1), ('Personas Aptas', 2)]:
+                    c = ws_concl.cell(row=r, column=col, value=hdr)
+                    c.font = header_font
+                    c.fill = header_fill
+                for persona_rec in concl.personas_recomendadas:
+                    ws_concl.append([persona_rec.rol, ', '.join(persona_rec.personas)])
+                    for col in range(1, 3):
+                        ws_concl.cell(row=ws_concl.max_row, column=col).alignment = Alignment(wrap_text=True)
+
+            # Brechas
+            if concl.brechas:
+                r = ws_concl.max_row + 2
+                ws_concl.cell(row=r, column=1, value='BRECHAS DETECTADAS').font = Font(bold=True, color='FFFFFF')
+                ws_concl.cell(row=r, column=1).fill = PatternFill('solid', fgColor='9C1A1A')
+                ws_concl.merge_cells(f'A{r}:D{r}')
+                for i, brecha in enumerate(concl.brechas, 1):
+                    ws_concl.append([f'{i}. {brecha}', '', '', ''])
+                    ws_concl.cell(row=ws_concl.max_row, column=1).alignment = Alignment(wrap_text=True)
+                    ws_concl.merge_cells(f'A{ws_concl.max_row}:D{ws_concl.max_row}')
+
+            # Recomendaciones
+            if concl.recomendaciones:
+                r = ws_concl.max_row + 2
+                ws_concl.cell(row=r, column=1, value='RECOMENDACIONES').font = Font(bold=True, color='FFFFFF')
+                ws_concl.cell(row=r, column=1).fill = PatternFill('solid', fgColor='1F4E79')
+                ws_concl.merge_cells(f'A{r}:D{r}')
+                for i, rec in enumerate(concl.recomendaciones, 1):
+                    ws_concl.append([f'{i}. {rec}', '', '', ''])
+                    ws_concl.cell(row=ws_concl.max_row, column=1).alignment = Alignment(wrap_text=True)
+                    ws_concl.merge_cells(f'A{ws_concl.max_row}:D{ws_concl.max_row}')
+
+            ws_concl.column_dimensions['A'].width = 60
+            ws_concl.column_dimensions['B'].width = 35
+            ws_concl.column_dimensions['C'].width = 20
+            ws_concl.column_dimensions['D'].width = 50
+        except Exception as exc:
+            logger.warning('No se pudo generar hoja Conclusion Ejecutiva: %s', exc)
+
+    # ---- Hoja: Tiempos de Ejecucion ----
+    try:
+        import json as _json
+        timing_entries = _json.loads(session.timing_json or '[]')
+        if timing_entries:
+            ws_tim = wb.create_sheet('Tiempos de Ejecucion')
+            tim_headers = ['Paso', 'Tarea Celery', 'Duracion (s)', 'Estado']
+            for col_num, header in enumerate(tim_headers, 1):
+                cell = ws_tim.cell(row=1, column=col_num, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = Alignment(horizontal='center')
+            fill_ok  = PatternFill('solid', fgColor='C6EFCE')
+            fill_err = PatternFill('solid', fgColor='FFC7CE')
+            total_s = 0.0
+            for entry in timing_entries:
+                dur = entry.get('duracion_s', 0)
+                total_s += dur
+                estado = entry.get('estado', 'ok')
+                row_num = ws_tim.max_row + 1
+                ws_tim.append([
+                    entry.get('paso', ''),
+                    entry.get('tarea', ''),
+                    dur,
+                    estado.upper(),
+                ])
+                row_fill = fill_ok if estado == 'ok' else fill_err
+                for c in range(1, 5):
+                    ws_tim.cell(row=row_num, column=c).fill = row_fill
+            # Fila de total
+            total_row = ws_tim.max_row + 1
+            ws_tim.cell(row=total_row, column=1, value='TOTAL')
+            ws_tim.cell(row=total_row, column=3, value=round(total_s, 1))
+            for c in range(1, 5):
+                ws_tim.cell(row=total_row, column=c).font = Font(bold=True)
+            for col in ws_tim.columns:
+                max_len = max((len(str(cell.value or '')) for cell in col), default=10)
+                ws_tim.column_dimensions[col[0].column_letter].width = min(max_len + 4, 50)
+            _apply_table_format(ws_tim, "TimTable")
+    except Exception as exc:
+        logger.warning('No se pudo generar hoja Tiempos de Ejecucion: %s', exc)
 
     # ---- Generar respuesta ----
     output = BytesIO()
@@ -771,7 +1066,7 @@ def export_text(request, pk):
                 if rup.cumple_valor is not None:
                     lines.append(f'  │  Valor           : {"CUMPLE" if rup.cumple_valor else "NO CUMPLE"}')
                 else:
-                    lines.append(f'  │  Valor           : N/A')
+                    lines.append('  │  Valor           : N/A')
 
                 # FIX BUG-3: mostrar score aunque cumple_objeto sea None
                 if rup.score_objeto is not None:
@@ -868,17 +1163,78 @@ def export_context(request, pk):
 # ---------------------------------------------------------------------------
 
 def analysis_auto(request, pk):
-    """Renderiza la pagina de evaluacion automatica con barra de progreso."""
+    """Renderiza la pagina de evaluacion automatica (observador del progreso backend)."""
     session = get_object_or_404(AnalysisSession, pk=pk)
     context = {
         'session': session,
-        'ingest_task_id': request.GET.get('ingest_task', ''),
+        'auto_steps': AUTO_FLOW_STEPS,
         'results_url': reverse('analysis:results', kwargs={'pk': pk}),
-        'extract_url': reverse('analysis:extract', kwargs={'pk': pk}),
-        'auto_exp_url': reverse('analysis:auto_evaluate_experience', kwargs={'pk': pk}),
-        'auto_ind_url': reverse('analysis:auto_evaluate_indicators', kwargs={'pk': pk}),
+        'progress_url': reverse('analysis:auto_progress', kwargs={'pk': pk}),
     }
     return render(request, 'analysis/auto.html', context)
+
+
+@require_GET
+def auto_progress(request, pk):
+    """
+    Devuelve el progreso del flujo automatico reconstruido desde la BD
+    (timing_json + status). No depende del result backend de Celery, asi que
+    recargar o volver a la pagina repinta el estado real en curso.
+    """
+    session = get_object_or_404(AnalysisSession, pk=pk)
+
+    try:
+        timing = json.loads(session.timing_json or '[]')
+    except (json.JSONDecodeError, TypeError):
+        timing = []
+
+    # Mapear timing por nombre de paso (ultima entrada gana)
+    timing_by_name = {e.get('paso'): e for e in timing if e.get('paso')}
+
+    last_step_name = AUTO_FLOW_STEPS[-1][0]
+    has_error = session.status == 'error' or any(e.get('estado') == 'error' for e in timing)
+    finished = not has_error and (
+        session.status == 'completed'
+        or last_step_name in timing_by_name
+        or (not session.auto_flow_active and bool(timing))
+    )
+
+    steps = []
+    running_assigned = False
+    total_s = 0.0
+    done_weight = 0
+    total_weight = sum(peso for _, _, peso in AUTO_FLOW_STEPS)
+
+    for nombre, label, peso in AUTO_FLOW_STEPS:
+        entry = timing_by_name.get(nombre)
+        if entry is not None:
+            estado = 'error' if entry.get('estado') == 'error' else 'ok'
+            dur = entry.get('duracion_s')
+            if dur:
+                total_s += dur
+            if estado == 'ok':
+                done_weight += peso
+            steps.append({'label': label, 'peso': peso, 'estado': estado, 'duracion_s': dur})
+        else:
+            # Primer paso sin entrada → es el que esta corriendo (salvo finished/error)
+            if not running_assigned and not finished and not has_error:
+                estado = 'running'
+                running_assigned = True
+            else:
+                estado = 'pending'
+            steps.append({'label': label, 'peso': peso, 'estado': estado, 'duracion_s': None})
+
+    progreso_pct = round(done_weight / total_weight * 100) if total_weight else 0
+    if finished:
+        progreso_pct = 100
+
+    return JsonResponse({
+        'steps': steps,
+        'progreso_pct': progreso_pct,
+        'total_s': round(total_s, 1),
+        'finished': finished,
+        'error': has_error,
+    })
 
 
 @require_POST
@@ -901,34 +1257,73 @@ def auto_evaluate_indicators(request, pk):
     return JsonResponse({'task_id': task.id})
 
 
+@require_POST
+def auto_evaluate_team_profiles(request, pk):
+    """Lanza evaluacion de perfiles de equipo usando los datos ya extraidos en la sesion."""
+    session = get_object_or_404(AnalysisSession, pk=pk)
+    if not session.team_profiles_json:
+        return JsonResponse({'error': 'No hay perfiles de equipo extraidos'}, status=400)
+    task = evaluate_team_profiles_task.delay(session.id)
+    return JsonResponse({'task_id': task.id})
+
+
+@require_POST
+def auto_generate_conclusion(request, pk):
+    """Lanza generacion de conclusion ejecutiva usando los resultados ya calculados."""
+    session = get_object_or_404(AnalysisSession, pk=pk)
+    task = generate_conclusion_task.delay(session.id)
+    return JsonResponse({'task_id': task.id})
+
+
 # ---------------------------------------------------------------------------
 # Vista: Evaluacion Rapida
 # ---------------------------------------------------------------------------
 
 def analysis_quick(request):
-    """
-    GET: Renderiza la pagina de Evaluacion Rapida.
-    Pasa session_id desde la sesion de Django si existe una sesion rapida previa.
-    """
-    quick_session_id = request.session.get('quick_session_id')
-    context = {
-        'quick_session_id': quick_session_id,
-        'system_threshold': SystemConfig.get_solo().threshold_objeto,
-    }
-    return render(request, 'analysis/quick.html', context)
+    """Redirige al nuevo chat Redneet (compatibilidad con links existentes)."""
+    return redirect('analysis:quick_redneet')
+
+
+def redneet_qa(request):
+    """Chat conversacional unificado: contratos, equipo e indicadores de Redneet."""
+    history = request.session.get('redneet_chat_history', [])
+    return render(request, 'analysis/redneet_qa.html', {'chat_history': history})
+
+
+@require_POST
+def redneet_qa_query(request):
+    """Endpoint síncrono: pregunta → ask_redneet → respuesta con memoria de conversación."""
+    history = request.session.get('redneet_chat_history', [])
+    try:
+        body = json.loads(request.body)
+        question = body.get('question', '').strip()
+        if not question:
+            return JsonResponse({'error': 'Pregunta vacía'}, status=400)
+        from tendermod.evaluation.redneet_inference import ask_redneet
+        answer = ask_redneet(question, chat_history=history)
+        history.append({'role': 'user', 'content': question})
+        history.append({'role': 'assistant', 'content': answer})
+        request.session['redneet_chat_history'] = history[-10:]  # ventana: 5 turnos
+        request.session.modified = True
+        return JsonResponse({'answer': answer})
+    except Exception as exc:
+        logger.error('redneet_qa_query error: %s', exc)
+        return JsonResponse({'error': str(exc)}, status=500)
+
+
+@require_POST
+def redneet_qa_clear(request):
+    """Limpia el historial de conversación Redneet de la sesión Django."""
+    request.session.pop('redneet_chat_history', None)
+    request.session.modified = True
+    return JsonResponse({'status': 'ok'})
 
 
 @require_POST
 def analysis_quick_evaluate(request):
     """
     POST (JSON): Lanza evaluaciones rapidas de experiencia o indicadores desde texto libre.
-
-    Body JSON:
-      {action: "experience", text: "..."}  — extrae ExperienceResponse y evalua
-      {action: "indicators", text: "..."}  — extrae MultipleIndicatorResponse y evalua
-      {action: "reset"}                    — elimina la sesion rapida activa
-
-    Responde con {task_id, session_id} o {status: "ok"} para reset.
+    Mantenido para compatibilidad con el flujo automatico del pliego.
     """
     try:
         body = json.loads(request.body)
@@ -947,7 +1342,6 @@ def analysis_quick_evaluate(request):
     if not plain_text:
         return JsonResponse({'error': 'El campo text no puede estar vacio'}, status=400)
 
-    # Obtener o crear la sesion de evaluacion rapida
     quick_session_id = request.session.get('quick_session_id')
     if quick_session_id:
         try:
@@ -961,7 +1355,6 @@ def analysis_quick_evaluate(request):
             status='pdf_ready',
         )
         request.session['quick_session_id'] = session.pk
-        logger.info('Sesion rapida %s creada', session.pk)
 
     if action == 'experience':
         try:
@@ -974,8 +1367,6 @@ def analysis_quick_evaluate(request):
 
     session.celery_task_id = task.id
     session.save(update_fields=['celery_task_id', 'updated_at'])
-
-    logger.info('Tarea rapida %s lanzada para sesion %s (action=%s)', task.id, session.pk, action)
     return JsonResponse({'task_id': task.id, 'session_id': session.pk})
 
 
@@ -1037,12 +1428,12 @@ def team_qa(request):
 @require_POST
 def team_qa_query(request):
     """Endpoint síncrono: pregunta → pipeline team_inference → respuesta con memoria."""
-    body = json.loads(request.body)
-    question = body.get('question', '').strip()
-    if not question:
-        return JsonResponse({'error': 'Pregunta vacía'}, status=400)
     history = request.session.get('team_chat_history', [])
     try:
+        body = json.loads(request.body)
+        question = body.get('question', '').strip()
+        if not question:
+            return JsonResponse({'error': 'Pregunta vacía'}, status=400)
         from tendermod.evaluation.team_inference import ask_team
         answer = ask_team(question, chat_history=history)
         history.append({'role': 'user', 'content': question})

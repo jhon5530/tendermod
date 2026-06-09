@@ -1,4 +1,5 @@
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -16,7 +17,6 @@ from tendermod.evaluation.prompts import (
 from tendermod.evaluation.schemas import GeneralRequirement, GeneralRequirementList
 from tendermod.ingestion.chapter_extractor import (
     extract_page_range,
-    filter_relevant_chapters,
     get_chapter_ranges,
 )
 from tendermod.ingestion.chunking import chunk_docs
@@ -34,9 +34,6 @@ logger = logging.getLogger(__name__)
 _MAX_BLOCK_CHARS = 20_000
 # Máximo de llamadas LLM concurrentes (respetar rate limits de OpenAI).
 _MAX_WORKERS = 5
-# Si los capítulos relevantes cubren menos del 60 % del PDF, añadir capítulos extra.
-_MIN_PAGE_COVERAGE = 0.60
-_MAX_EXTRA_CHAPTERS = 10
 
 # Keywords en el título del capítulo que indican obligaciones contractuales post-adjudicación.
 _OBLIGATION_CHAPTER_KEYWORDS = [
@@ -49,6 +46,32 @@ _OBLIGATION_CHAPTER_KEYWORDS = [
 _LANGUAGE_CHAPTER_KEYWORDS = [
     "IDIOMA", "LENGUAJE", "LANGUAGE", "LINGUA",
 ]
+
+
+_NUMERAL_RE = re.compile(r"\d+(\.\d+)+")
+
+
+def _normalize(text: str) -> str:
+    """Normaliza espacios y minúsculas para comparación de citas literales."""
+    return re.sub(r"\s+", " ", text).lower().strip()
+
+
+def _compute_confidence(req) -> float:
+    """
+    Heurística 0.0-1.0 para el campo confidence de GeneralRequirement.
+    - Sección con numeral (ej: '2.23.1'): +0.3
+    - Sección sin numeral pero presente: +0.1
+    - extracto_pliego no vacío (>20 chars): +0.2
+    - citation_verified=True: +0.2
+    """
+    score = 0.3
+    if req.seccion and req.seccion not in ("N/A", "None", ""):
+        score += 0.3 if _NUMERAL_RE.search(req.seccion) else 0.1
+    if req.extracto_pliego and len(req.extracto_pliego.strip()) > 20:
+        score += 0.2
+    if req.citation_verified is True:
+        score += 0.2
+    return round(min(score, 1.0), 2)
 
 
 def _is_obligation_chapter(title: str) -> bool:
@@ -70,162 +93,137 @@ def _get_pdf_path() -> str:
     return str(pdfs[0])
 
 
+def _build_blocks(pdf_path: str, chapters: list[dict]) -> list[dict]:
+    """
+    Fusiona capítulos consecutivos en bloques de <= _MAX_BLOCK_CHARS chars,
+    nunca cortando a mitad de un capítulo. Garantiza cobertura total del PDF.
+    """
+    blocks: list[dict] = []
+    current_text = ""
+    current_title = ""
+
+    for ch in chapters:
+        section_marker = (
+            f"\n\n[=== SECCIÓN: {ch['title'][:80]} | "
+            f"Páginas {ch['start_page'] + 1}–{ch['end_page']} ===]\n"
+        )
+        ch_text = section_marker + extract_page_range(pdf_path, ch["start_page"], ch["end_page"])
+        if len(current_text) + len(ch_text) > _MAX_BLOCK_CHARS and current_text:
+            blocks.append({
+                "text": current_text,
+                "title": current_title,
+                "is_obligation": _is_obligation_chapter(current_title),
+                "is_language": _is_language_chapter(current_title),
+            })
+            current_text = ch_text
+            current_title = ch["title"]
+        else:
+            if not current_title:
+                current_title = ch["title"]
+            current_text += ch_text
+
+    if current_text:
+        blocks.append({
+            "text": current_text,
+            "title": current_title,
+            "is_obligation": _is_obligation_chapter(current_title),
+            "is_language": _is_language_chapter(current_title),
+        })
+
+    return blocks
+
+
+def _merge_results(raw_lists: list[list[GeneralRequirement]]) -> GeneralRequirementList:
+    """Deduplica y asigna IDs secuenciales."""
+    seen: set[tuple] = set()
+    merged: list[GeneralRequirement] = []
+    next_id = 1
+    for req_list in raw_lists:
+        for req in req_list:
+            key = (req.tipo, req.seccion, req.descripcion[:80].lower())
+            if key not in seen:
+                seen.add(key)
+                req.id = next_id
+                next_id += 1
+                merged.append(req)
+    return GeneralRequirementList(requisitos=merged)
+
+
 def get_general_requirements(k: int = 3) -> GeneralRequirementList:
     """
-    Extrae requerimientos generales del pliego por capítulos completos.
+    Extrae requerimientos generales del pliego escaneando el documento completo.
 
     Flujo:
-    1. Detectar capítulos del PDF (TOC nativo → LLM → heurística).
-    2. Filtrar capítulos relevantes por keywords en el título.
-    3. Por cada capítulo, extraer texto completo y llamar al LLM.
+    1. Detectar capítulos del PDF (TOC nativo → LLM → visual tipográfico).
+    2. Fusionar capítulos consecutivos en bloques de ≤20K chars sin cortar a mitad
+       de sección (_build_blocks). Se procesan TODOS los capítulos sin filtro de keywords.
+    3. Procesar bloques en paralelo con el LLM.
     4. Merge con deduplicación por (seccion, descripcion[:60]).
-    5. Si se extraen < 10 ítems, re-intentar con capítulos descartados.
     """
     pdf_path = _get_pdf_path()
 
+    doc = fitz.open(pdf_path)
+    n_pdf_pages = len(doc)
+    doc.close()
+
     chapters = get_chapter_ranges(pdf_path, use_llm=True)
-    relevant_chapters = filter_relevant_chapters(chapters)
 
-    # Safety net: si los capítulos relevantes cubren < 60 % del PDF, añadir más
-    # Usar el conteo real de páginas del PDF, no el end_page del último capítulo detectado
-    # (el LLM sólo escanea las primeras 25 páginas, por lo que chapters puede terminar
-    # mucho antes del final del documento).
-    _doc = fitz.open(pdf_path)
-    n_pdf_pages = len(_doc)
-    _doc.close()
-    covered_pages = sum(ch["end_page"] - ch["start_page"] for ch in relevant_chapters)
-    coverage = covered_pages / n_pdf_pages if n_pdf_pages > 0 else 1.0
+    if not chapters:
+        logger.warning("[get_general_requirements] Sin capítulos detectados — fallback bloque único")
+        chapters = [{"title": "Documento completo", "start_page": 0, "end_page": n_pdf_pages}]
+
+    blocks = _build_blocks(pdf_path, chapters)
+
     logger.info(
-        "[get_general_requirements] Cobertura de páginas: %.0f%% (%d/%d capítulos seleccionados)",
-        coverage * 100, len(relevant_chapters), len(chapters),
+        "[get_general_requirements] %d capítulos → %d bloques en paralelo (max %d workers)",
+        len(chapters), len(blocks), _MAX_WORKERS,
     )
-    if coverage < _MIN_PAGE_COVERAGE:
-        remaining = [ch for ch in chapters if ch not in relevant_chapters]
-        extra = remaining[:_MAX_EXTRA_CHAPTERS]
-        logger.warning(
-            "[get_general_requirements] Cobertura baja (%.0f%%) — añadiendo %d capítulos extra",
-            coverage * 100, len(extra),
-        )
-        relevant_chapters = relevant_chapters + extra
 
-    if not relevant_chapters:
-        logger.warning("[get_general_requirements] No se detectaron capítulos relevantes")
-        return GeneralRequirementList(requisitos=[])
-
-    def _fetch_chapter_requirements(chapter: dict) -> list[GeneralRequirement]:
-        """Extrae requerimientos de un capítulo (ejecutable en paralelo)."""
-        title = chapter["title"]
-        chapter_text = extract_page_range(pdf_path, chapter["start_page"], chapter["end_page"])
-        n_chars = len(chapter_text)
-
-        logger.info(
-            "[get_general_requirements] Capítulo '%s' (pág %d–%d, ~%d tokens)",
-            title, chapter["start_page"] + 1, chapter["end_page"], n_chars // 4,
-        )
-
-        sub_blocks = (
-            [chapter_text[i: i + _MAX_BLOCK_CHARS] for i in range(0, n_chars, _MAX_BLOCK_CHARS)]
-            if n_chars > _MAX_BLOCK_CHARS
-            else [chapter_text]
-        )
-
-        is_obligation = _is_obligation_chapter(title)
-        is_language = _is_language_chapter(title)
-        results: list[GeneralRequirement] = []
-        for block in sub_blocks:
-            try:
-                partial = run_llm_requirements_from_chapter(block, title, is_obligation=is_obligation)
-                results.extend(partial.requisitos)
-            except Exception as exc:
-                logger.error(
-                    "[get_general_requirements] Error en capítulo '%s': %s", title, exc
-                )
-        # Override determinístico: forzar tipo según el capítulo, sin depender del LLM.
-        if is_obligation:
-            for req in results:
-                req.tipo = "OBLIGACION"
-        elif is_language:
-            for req in results:
-                req.tipo = "IDIOMA"
-                req.categoria = "IDIOMA"
-
-        logger.info(
-            "[get_general_requirements] '%s': %d requerimientos extraídos (obligation=%s, language=%s)",
-            title, len(results), is_obligation, is_language,
-        )
-        return results
-
-    def _merge_results(raw_lists: list[list[GeneralRequirement]]) -> GeneralRequirementList:
-        """Deduplica y asigna IDs secuenciales."""
-        seen: set[tuple] = set()
-        merged: list[GeneralRequirement] = []
-        next_id = 1
-        for req_list in raw_lists:
-            for req in req_list:
-                key = (req.seccion, req.descripcion[:60].lower())
-                if key not in seen:
-                    seen.add(key)
-                    req.id = next_id
-                    next_id += 1
-                    merged.append(req)
-        return GeneralRequirementList(requisitos=merged)
-
-    # ── Procesamiento paralelo de capítulos relevantes ──────────────────────
-    logger.info(
-        "[get_general_requirements] Procesando %d capítulos en paralelo (max %d workers)",
-        len(relevant_chapters), _MAX_WORKERS,
-    )
-    raw_results: list[list[GeneralRequirement]] = [[] for _ in relevant_chapters]
+    raw_results: list[list[GeneralRequirement]] = [[] for _ in blocks]
     with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
         future_to_idx = {
-            pool.submit(_fetch_chapter_requirements, ch): i
-            for i, ch in enumerate(relevant_chapters)
+            pool.submit(
+                run_llm_requirements_from_chapter,
+                b["text"], b["title"],
+                is_obligation=b["is_obligation"],
+            ): i
+            for i, b in enumerate(blocks)
         }
         for future in as_completed(future_to_idx):
             idx = future_to_idx[future]
             try:
-                raw_results[idx] = future.result()
+                partial = future.result()
+                if blocks[idx]["is_obligation"]:
+                    for req in partial.requisitos:
+                        req.tipo = "OBLIGACION"
+                elif blocks[idx]["is_language"]:
+                    for req in partial.requisitos:
+                        req.tipo = "IDIOMA"
+                        req.categoria = "IDIOMA"
+
+                # Validación de cita + heurística de confianza
+                normalized_block = _normalize(blocks[idx]["text"])
+                for req in partial.requisitos:
+                    extracto = req.extracto_pliego.strip()
+                    if extracto and len(extracto) > 15:
+                        probe = _normalize(extracto)[:60]
+                        req.citation_verified = probe in normalized_block
+                    req.confidence = _compute_confidence(req)
+
+                raw_results[idx] = partial.requisitos
+                logger.info(
+                    "[get_general_requirements] Bloque %d/%d '%s': %d requisitos",
+                    idx + 1, len(blocks), blocks[idx]["title"][:40], len(raw_results[idx]),
+                )
             except Exception as exc:
                 logger.error(
-                    "[get_general_requirements] Hilo %d falló: %s", idx, exc
+                    "[get_general_requirements] Bloque %d falló: %s", idx + 1, exc
                 )
 
     result = _merge_results(raw_results)
-
-    # Re-intento si la cobertura es baja: procesar capítulos descartados
-    if len(result.requisitos) < 10:
-        logger.warning(
-            "[get_general_requirements] Solo %d requisitos — re-intentando con capítulos no seleccionados",
-            len(result.requisitos),
-        )
-        remaining = [ch for ch in chapters if ch not in relevant_chapters]
-        extra: list[list[GeneralRequirement]] = []
-        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
-            futures = []
-            for ch in remaining[:5]:
-                if len(extract_page_range(pdf_path, ch["start_page"], ch["end_page"])) >= 500:
-                    futures.append(pool.submit(_fetch_chapter_requirements, ch))
-            for future in as_completed(futures):
-                try:
-                    extra.append(future.result())
-                except Exception as exc:
-                    logger.error("[get_general_requirements] Re-intento falló: %s", exc)
-
-        # Merge extra sobre el resultado existente
-        seen_keys = {(r.seccion, r.descripcion[:60].lower()) for r in result.requisitos}
-        next_id = len(result.requisitos) + 1
-        for req_list in extra:
-            for req in req_list:
-                key = (req.seccion, req.descripcion[:60].lower())
-                if key not in seen_keys:
-                    seen_keys.add(key)
-                    req.id = next_id
-                    next_id += 1
-                    result.requisitos.append(req)
-
     logger.info(
-        "[get_general_requirements] %d capítulos relevantes → %d requerimientos únicos",
-        len(relevant_chapters), len(result.requisitos),
+        "[get_general_requirements] %d bloques → %d requerimientos únicos",
+        len(blocks), len(result.requisitos),
     )
     return result
 

@@ -128,13 +128,14 @@
 {% endblock %}
 
 {% block extra_js %}
+{{ chat_history|json_script:"team-chat-history-data" }}
 <script>
 var QUERY_URL = "{% url 'analysis:team_qa_query' %}";
 var CLEAR_URL  = "{% url 'analysis:team_qa_clear' %}";
 var DB_STATUS_URL = "/api/db-status/";
 
 // Historial persistido en sesión Django — hidrata el chat al cargar la página
-var INITIAL_HISTORY = {{ chat_history|safe }};
+var INITIAL_HISTORY = JSON.parse(document.getElementById('team-chat-history-data').textContent);
 
 function getCsrfToken() {
     var el = document.querySelector('[name=csrfmiddlewaretoken]');

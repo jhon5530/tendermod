@@ -2,15 +2,15 @@ import json
 import logging
 import re
 
-from openai import OpenAI
 from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage
-
-logger = logging.getLogger(__name__)
+from openai import OpenAI
 
 from tendermod.evaluation.prompts import basic_comparation_system_prompt, basic_comparation_user_prompt
-from tendermod.evaluation.schemas import ExperienceResponse, MultipleIndicatorResponse, GeneralRequirementList
+from tendermod.evaluation.schemas import ExperienceResponse, GeneralRequirementList, MultipleIndicatorResponse
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 def run_llm_indices(system_message, user_message, max_tokens=2500, temperature=0, top_p=1):
@@ -103,25 +103,22 @@ def run_llm_requirements_from_chapter(
     chapter_title: str,
     is_obligation: bool = False,
 ) -> GeneralRequirementList:
-    """Extrae requerimientos del texto completo de un capítulo del pliego."""
+    """Extrae requerimientos del texto completo de un bloque del pliego."""
     from tendermod.evaluation.prompts import (
         qna_system_message_general_requirements,
-        qna_user_message_general_requirements,
+        qna_user_message_chapter_extraction,
     )
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0)
     structured_llm = llm.with_structured_output(GeneralRequirementList)
-    question_str = f"requerimientos en el capítulo: {chapter_title}"
+
+    user_content = qna_user_message_chapter_extraction.replace("{context}", chapter_text)
+
     if is_obligation:
-        question_str += (
+        user_content += (
             "\n\n⚠️ NOTA CRÍTICA: Este bloque pertenece a un capítulo de OBLIGACIONES DEL "
             "CONTRATISTA o SUPERVISIÓN (ejecución contractual). Por defecto todos sus ítems "
             "son tipo='OBLIGACION', categoria='OTRO'. NUNCA uses tipo='PUNTUABLE'."
         )
-    user_content = (
-        qna_user_message_general_requirements
-        .replace("{context}", chapter_text)
-        .replace("{question}", question_str)
-    )
     messages = [
         SystemMessage(content=qna_system_message_general_requirements),
         HumanMessage(content=user_content),
@@ -131,20 +128,30 @@ def run_llm_requirements_from_chapter(
 
 def run_llm_experience_from_chapters(chapters_text: str):
     """Extrae ExperienceResponse del texto completo de capítulos de experiencia."""
-    from tendermod.evaluation.prompts import qna_system_message_experience
-    from tendermod.evaluation.schemas import ExperienceResponse
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    structured_llm = llm.with_structured_output(ExperienceResponse)
-    user_content = (
-        "###Context\n"
-        + chapters_text
-        + "\n\n###Question\n"
-        "Extrae TODOS los requisitos de experiencia del proponente: "
-        "códigos UNSPSC, valor mínimo en SMMLV o COP por segmento, objeto requerido, "
-        "cantidad de contratos y cualquier segmento o sub-requisito independiente de experiencia."
+    from tendermod.evaluation.prompts import (
+        EXPERIENCE_CHAPTERS_EXTRACTION_SYSTEM,
+        EXPERIENCE_CHAPTERS_EXTRACTION_USER,
     )
+    from tendermod.evaluation.schemas import ExperienceResponse
+    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0)
+    structured_llm = llm.with_structured_output(ExperienceResponse)
+    user_content = EXPERIENCE_CHAPTERS_EXTRACTION_USER.replace("{text}", chapters_text)
     messages = [
-        SystemMessage(content=qna_system_message_experience),
+        SystemMessage(content=EXPERIENCE_CHAPTERS_EXTRACTION_SYSTEM),
+        HumanMessage(content=user_content),
+    ]
+    return structured_llm.invoke(messages)
+
+
+def run_llm_conclusion(context_json: str):
+    """Genera conclusión ejecutiva sintetizando todos los resultados de evaluación."""
+    from tendermod.evaluation.prompts import CONCLUSION_SYSTEM, CONCLUSION_USER_TEMPLATE
+    from tendermod.evaluation.schemas import EvaluacionConclusionResult
+    llm = ChatOpenAI(model="gpt-4o", temperature=0.2)
+    structured_llm = llm.with_structured_output(EvaluacionConclusionResult)
+    user_content = CONCLUSION_USER_TEMPLATE.replace("{context_json}", context_json)
+    messages = [
+        SystemMessage(content=CONCLUSION_SYSTEM),
         HumanMessage(content=user_content),
     ]
     return structured_llm.invoke(messages)
@@ -157,7 +164,7 @@ def run_llm_chapter_detection(pages_text: str, total_pages: int) -> list[dict]:
     """
     from tendermod.evaluation.prompts import CHAPTER_DETECTION_SYSTEM, CHAPTER_DETECTION_USER
 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0)
     user_content = (
         CHAPTER_DETECTION_USER
         .replace("{pages_text}", pages_text)

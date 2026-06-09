@@ -29,11 +29,27 @@ CRITICAL RULES for the "valor" field:
 - The "valor" field MUST be a STRING that includes BOTH the comparison operator AND the numeric threshold, exactly as written in the document.
 - Examples of correct format: "Mayor o igual a 1.13", "Menor o igual a 0.84", "Mayor o igual a 1.00"
 - NEVER return just a number. "1.13" alone is WRONG. "Mayor o igual a 1.13" is CORRECT.
-- Use a dot (.) as the decimal separator in the output, even if the source uses a comma.
+- Use a dot (.) as the decimal separator in the output, even if the source uses a comma (e.g. "1,13" in the pliego → "1.13" in the output).
+
+DECIMAL SEPARATOR RULE:
+- Colombian pliegos often use comma as decimal separator ("1,13") and dot as thousands separator ("1.500.000").
+- Always convert: if the source has "1,13", write "1.13" in the JSON output.
+- If the source has "1.13" (already using dot), keep it as "1.13".
 
 CRITICAL: Extract ONLY the indicators and values that appear explicitly in the context provided.
 Do NOT invent, assume, or reuse any values from these instructions. If the context does not
 mention a specific indicator or value, do not include it in the output.
+
+EXAMPLES OF CORRECT RESPONSES:
+
+Context: "El índice de liquidez debe ser mayor o igual a 1.13"
+Output: {"answer": [{"indicador": "Índice de Liquidez", "valor": "Mayor o igual a 1.13"}]}
+
+Context: "Se exige endeudamiento <= 0.45 y rentabilidad del patrimonio >= 20%"
+Output: {"answer": [{"indicador": "Endeudamiento", "valor": "Menor o igual a 0.45"}, {"indicador": "Rentabilidad del Patrimonio", "valor": "Mayor o igual a 20%"}]}
+
+Context: "Índice de liquidez ≥ 1,13" (comma as decimal in source)
+Output: {"answer": [{"indicador": "Índice de Liquidez", "valor": "Mayor o igual a 1.13"}]}
 
 Return the result ONLY as JSON matching this exact schema (the names and values below are
 FORMAT PLACEHOLDERS — replace them entirely with what you find in the context):
@@ -80,8 +96,12 @@ Reglas:
    - condicion = "Menor que"       → valor_empresa < umbral
 3. Si "condicion" contiene texto libre (ej: "Mayor o igual a 1.13"), extrae tú mismo el operador y el umbral numérico del texto e interprétalos correctamente. NUNCA declares un indicador como no evaluable si hay suficiente información para comparar.
 4. Si el umbral requiere cálculo contextual (ej: "50% del presupuesto"), usa la información general del proceso para resolverlo.
-5. Si un indicador no tiene valor_empresa (None o faltante), márcalo como no evaluable.
-6. La evaluación final es "Cumple" si TODOS los indicadores evaluables cumplen, "No cumple" si alguno falla.
+5. Si un indicador no tiene valor_empresa (None o faltante):
+   - Indica exactamente: "El indicador [nombre] no es evaluable: dato faltante en la empresa."
+   - NO lo marques como CUMPLE ni como NO CUMPLE.
+   - NO penalices al proponente por datos faltantes del sistema.
+   - Si todos los demás indicadores cumplen pero alguno es no-evaluable, el resultado final es INDETERMINADO — NO "No cumple".
+6. La evaluación final es "Cumple" si TODOS los indicadores evaluables cumplen, "No cumple" si alguno evaluable falla, INDETERMINADO si hay indicadores no-evaluables y ninguno falla.
 7. Responde con: evaluación por indicador, conclusión final ("Cumple" o "No cumple"), y argumento breve.
 """
 
@@ -154,7 +174,12 @@ The agent must answer the following questions based on the contextual informatio
    - NEVER return isolated 1 or 2-digit fragments as separate codes. Every entry in "Listado de codigos" must be a complete 6 or 8-digit numeric string.
    - Codes can be repeated; do not delete any. List all complete codes that appear.
 2- How many UNSPC codes must be met or included in each contract?
-3- What is the required purpose of the experience? Answer only if the word "purpose" appears verbatim. In this case, write what follows the next word verbatim, without any changes, and in quotation marks. If the word "purpose" does not appear, then answer "No specific purpose is required."
+3- What is the actual object/purpose of the procurement process? Extract the SPECIFIC description of what is being contracted (e.g., "Suministro de equipos de redes y telecomunicaciones", "Servicios de ciberseguridad").
+   CRITICAL: Never write meta-text about what the experience must be "related to". The Objeto field must contain the REAL thing being contracted, not a description of the requirement.
+   - WRONG: "Los contratos deben estar relacionados con el objeto del proceso de selección"
+   - WRONG: "El objeto de los contratos ejecutados debe estar relacionado con el objeto del proceso"
+   - CORRECT: "Suministro e instalación de equipos de redes Cisco" (the actual goods/services)
+   If the actual object of the process is not mentioned in the context, write "None".
 4- How many contracts can be supported as experience?
 5- What is the required value to demonstrate experience? Distinguish carefully between these cases:
    - If the value is a fixed number of SMMLV (e.g., "250 SMMLV"), write the number followed by "SMMLV" (example: "250 SMMLV").
@@ -301,6 +326,59 @@ Here are some relevant excerpts from tender documents   that are relevant to ans
 Search information in chapters with information related to:
 {question}
 """
+
+
+# ── Prompt dedicado para extracción de experiencia desde capítulos completos ───
+# Usado por run_llm_experience_from_chapters() con with_structured_output(ExperienceResponse).
+# A diferencia de qna_system_message_experience (flujo RAG), este prompt:
+# - Está en español y usa los field names Python del schema (no aliases)
+# - No espera cabecera ###Context con metadatos RAG
+# - Está alineado con structured_output: el LLM llena campos, no produce JSON libre
+
+EXPERIENCE_CHAPTERS_EXTRACTION_SYSTEM = """Eres un extractor especializado en requisitos de experiencia de pliegos de condiciones de licitación pública colombiana.
+
+Se te proporcionará el texto COMPLETO de uno o varios capítulos del pliego. Tu tarea es extraer TODOS los requisitos de experiencia del proponente.
+
+INSTRUCCIONES DE EXTRACCIÓN:
+
+1. CÓDIGOS UNSPSC (campo listado_codigos):
+   - Son siempre numéricos con 6 u 8 dígitos.
+   - Si aparecen en una TABLA con columnas SEGMENTO / FAMILIA / CLASE: concatena los números en orden SEGMENTO(2 dígitos) + FAMILIA(2 dígitos) + CLASE(2 dígitos) = código de 6 dígitos. La columna GRUPO tiene prefijo de letra (ej: "E -") — ignórala.
+   - Si aparecen ya formados (ej: "432217" o "43-22-17-00"): extráelos quitando guiones.
+   - NUNCA retornes fragmentos aislados de 1 o 2 dígitos como códigos separados.
+   - Lista TODOS los códigos que aparezcan, incluyendo repetidos.
+
+2. VALOR (campo valor):
+   - Si es en SMMLV: "N SMMLV" (ej: "864 SMMLV").
+   - Si es porcentaje del presupuesto: "X% del presupuesto" (ej: "100% del presupuesto").
+   - Si es en pesos: "$X.XXX.XXX COP" (ej: "$1.229.255.702 COP").
+   - NUNCA confundas "100% del presupuesto expresado en SMMLV" con "100 SMMLV".
+
+3. MODO DE EVALUACIÓN (campo modo_evaluacion):
+   - "MULTI_CONDICION": cuando el pliego exige sub-requisitos INDEPENDIENTES cada uno con su propio contrato (ej: "Al menos 1 contrato con [X]" Y "Al menos 1 contrato con [Y]", o segmentos con valores propios).
+   - "GLOBAL": todos los demás casos, incluyendo cuando se piden N contratos con los mismos códigos.
+   - Si es MULTI_CONDICION: extrae cada sub-requisito en el campo sub_requisitos con su propio valor_minimo.
+
+4. OBJETO (campo objeto):
+   REGLA CRÍTICA: este campo debe contener el OBJETO REAL del proceso (qué se va a contratar), nunca el meta-texto sobre la relación requerida.
+   - Si el pliego dice "la experiencia debe guardar relación con el objeto del proceso" o expresión equivalente, BUSCA en el mismo texto cuál es el objeto del contrato que se va a celebrar (ej: "Suministro de equipos de redes") y ponlo aquí.
+   - INCORRECTO: "Los contratos deben estar relacionados con el objeto del proceso de selección"
+   - CORRECTO: "Suministro e instalación de equipos de redes y telecomunicaciones Cisco"
+   - Si el texto solo hace referencia genérica al objeto sin especificarlo en ninguna parte, deja el campo en "None".
+   - Si hay solo códigos UNSPSC sin mención de relación con el objeto: deja en "None".
+
+5. REGLA DE CÓDIGOS (campo regla_codigos):
+   - "ALL": SOLO si el pliego dice explícitamente que TODOS los códigos deben estar en el mismo contrato.
+   - "AT_LEAST_ONE": todos los demás casos.
+
+Si el texto no contiene información sobre algún campo, usa el valor por defecto del schema (listado_codigos=[], valor="None", etc.).
+Devuelve SOLO el objeto estructurado. Sin texto adicional."""
+
+EXPERIENCE_CHAPTERS_EXTRACTION_USER = """Texto del pliego de condiciones (capítulos de experiencia):
+
+{text}
+
+Extrae TODOS los requisitos de experiencia del proponente que aparezcan en este texto."""
 
 
 # Other ideas
@@ -472,6 +550,25 @@ y documentales) related to:
 {question}
 """
 
+qna_user_message_chapter_extraction = """###Context
+El siguiente texto ha sido extraído del pliego de condiciones (puede contener múltiples secciones y páginas consecutivas):
+
+{context}
+
+###Instrucción
+Extrae ABSOLUTAMENTE TODOS los requerimientos que el proponente debe cumplir o presentar, incluyendo sin excepción:
+- Requisitos técnicos habilitantes: certificaciones de fabricante o partner (Cisco, Microsoft, etc.), acreditaciones técnicas, normas ISO, especificaciones técnicas, cumplimiento de anexos técnicos
+- Requisitos de experiencia y capacidad organizacional
+- Indicadores financieros (liquidez, endeudamiento, cobertura, rentabilidad, ROE, ROA) con sus umbrales
+- Formularios, anexos y documentos requeridos con la oferta
+- Pólizas y garantías exigidas
+- Causales de rechazo automático de la propuesta
+- Criterios de evaluación con puntaje (PUNTUABLE)
+- Criterios de desempate o preferencia con puntaje
+
+NOTA CRÍTICA: El texto puede incluir fragmentos que inician a mitad de oración (corte de página anterior). Si se puede identificar la obligación del proponente aunque el texto esté incompleto al inicio, extrae el requerimiento con la descripción más completa posible.
+"""
+
 PLIEGO_QA_SYSTEM_PROMPT = """
 Eres un asistente que responde preguntas sobre el pliego de condiciones de una licitación pública colombiana.
 Responde SOLO con información del contexto proporcionado.
@@ -571,4 +668,184 @@ TEAM_ANSWER_USER = """Pregunta: {question}
 Resultados de la consulta SQL:
 {results}
 
+IMPORTANTE: Si los resultados muestran solo Persona y Cargo (sin columna Certificacion), \
+significa que cada persona listada cumple TODOS los criterios de búsqueda de la pregunta. \
+No digas que falta información — las personas listadas SÍ tienen todas las certificaciones pedidas.
+
 Responde la pregunta basándote exclusivamente en estos resultados."""
+
+# ── Arquitectura Full-Context (reemplaza al pipeline Intent→SQL→LLM) ──────────
+TEAM_CONTEXT_SYSTEM = """Eres un asistente experto en el equipo técnico de una empresa de TI.
+Recibirás el listado COMPLETO de personas y certificaciones del equipo.
+Responde en español, de forma concisa y directa.
+- Para preguntas de lista o "quiénes": enumera las personas con su cargo.
+- Para preguntas de conteo: da el número exacto.
+- Para preguntas de detalle: incluye las certificaciones relevantes con su estado de vigencia.
+- Cuando la pregunta pida personas con MÚLTIPLES certificaciones (ej: "CCNA y ITIL"), \
+busca personas que tengan TODAS ellas — verifica cada una explícitamente antes de responder.
+- Usa SOLO los datos del contexto. Nunca inventes información."""
+
+TEAM_CONTEXT_USER = """Listado completo del equipo (personas y certificaciones):
+
+{team_data}
+
+---
+Pregunta: {question}
+
+Responde basándote exclusivamente en los datos anteriores."""
+
+# ── Prompts: Extracción y evaluación de perfiles de equipo de trabajo ─────────
+
+PROFILE_EXTRACTION_SYSTEM = """Eres un extractor de requisitos de equipo de trabajo de pliegos de condiciones de licitación pública colombiana.
+
+Tu tarea es identificar los perfiles o roles de personal EXPLÍCITAMENTE DEFINIDOS como requisito habilitante en el texto proporcionado.
+
+REGLA ANTI-ALUCINACIÓN — CRÍTICA. DEVUELVE perfiles:[] SI:
+- El fragmento NO contiene una sección explícita de equipo de trabajo, personal requerido o perfiles del contratista.
+- El texto describe bienes, equipos, marcas (ej: Cisco, Microsoft, Fortinet) o servicios que se contratan — sin una tabla/lista dedicada a PERSONAL REQUERIDO.
+- El texto describe especificaciones técnicas de equipos (routers, switches, servidores, licencias) sin sección de personal.
+- Los roles aparecen SOLO en el índice / tabla de contenido, sin que el bloque actual contenga el desarrollo del requisito.
+- El texto habla de OBLIGACIONES DEL CONTRATISTA DURANTE LA EJECUCIÓN ("El contratista asignará...", "El contratista dispondrá de...", "Se requerirá un supervisor en sitio durante...") — estas son cláusulas de ejecución, NO requisitos habilitantes de personal.
+- El rol se menciona en la descripción del OBJETO DEL CONTRATO o en el alcance técnico del servicio, sin una sección separada de "Equipo de trabajo" o "Personal requerido".
+
+VALIDEZ DE UN PERFIL: Un perfil es válido SOLO si el pliego especifica EXPLÍCITAMENTE al menos UNO de estos tres:
+1. Formación profesional requerida (título universitario específico)
+2. Certificación técnica requerida (ej: PMP, ITIL, Cisco CCNP)
+3. Años de experiencia mínimos (número concreto de años)
+
+Si el pliego solo menciona el nombre del rol sin especificar ninguno de los tres anteriores, NO es un requisito habilitante de personal: devuelve perfiles:[] para ese bloque.
+
+Para cada perfil VÁLIDO extrae:
+- rol: nombre exacto del cargo tal como aparece en el texto
+- cantidad: número de personas requeridas (1 si no se especifica)
+- formacion_requerida: títulos profesionales aceptables con lógica OR
+- posgrado_requerido: posgrados o certificaciones equivalentes con lógica OR
+- certificaciones_requeridas: certificaciones técnicas (agregar "vigente" si el pliego lo exige)
+- anios_experiencia_min: años mínimos de experiencia (null si no se especifica)
+- contratos_min: número mínimo de contratos acreditados (null si no se especifica)
+- descripcion_experiencia: descripción del tipo de experiencia requerida
+- disponibilidad: dedicación o modalidad de trabajo requerida
+- seccion: número o nombre de la sección del pliego donde aparece
+- pagina: página aproximada donde aparece el perfil
+
+REGLAS:
+- Un ProfileRequirement por ROL distinto. Si el mismo rol aparece en varias subsecciones, unificar en uno.
+- Los campos formacion_requerida y posgrado_requerido usan lógica OR — incluir TODAS las alternativas mencionadas.
+- Si el pliego dice "o afines según el SNIES", incluir "afines" como último elemento de la lista.
+- Si NO hay perfiles válidos en este fragmento: devuelve {"perfiles": []}.
+- Devuelve SOLO JSON válido. Sin texto adicional. Sin markdown."""
+
+PROFILE_EXTRACTION_USER = """Fragmento del pliego de condiciones:
+
+{text}
+
+Si este fragmento contiene una sección de REQUISITOS HABILITANTES DE PERSONAL con formación, certificaciones o experiencia especificadas explícitamente, extrae los perfiles. Si no, devuelve {{"perfiles": []}}."""
+
+PROFILE_EVALUATION_SYSTEM = """Eres un evaluador experto en licitaciones públicas colombianas. Tu tarea es determinar qué personas del equipo de la empresa cumplen con un perfil de rol requerido en un pliego de condiciones.
+
+Se te dará:
+1. El perfil requerido (rol, formación, posgrado, certificaciones, experiencia)
+2. El listado completo del equipo con su formación académica y certificaciones
+
+REGLAS DE EVALUACIÓN:
+- formacion_requerida usa lógica OR: si la persona tiene CUALQUIERA de los títulos listados, cumple ese requisito
+- posgrado_requerido usa lógica OR: si la persona tiene CUALQUIERA de los posgrados/certificaciones listados, cumple
+- certificaciones_requeridas: cada elemento es un requisito separado; la persona debe cumplir TODOS
+- Si una certificación dice "vigente", verificar que Vigencia = "Vigente" en los datos
+- Para "afines según el SNIES": títulos en ingeniería de sistemas, telecomunicaciones, electrónica, telemática, sistemas y computación se consideran afines entre sí
+- Para experiencia: si Anios_Experiencia >= anios_experiencia_min, cumple ese criterio
+- Para contratos: si no hay datos de contratos en el equipo, no penalizar — marcar como "sin datos suficientes para verificar"
+
+FORMATO DE RESPUESTA:
+- personas_evaluadas: evalúa TODAS las personas del equipo
+- Para cada persona: cumple=True solo si satisface TODOS los requisitos evaluables
+- evidencia: lista concreta de qué satisface qué (ej: "Cisco CCNP [CISCO-MERAKI] (Vigente) satisface 'Cisco Partner vigente'")
+- gaps: lista de requisitos que la persona NO satisface
+- personas_que_cumplen: lista de nombres de quienes tienen cumple=True
+- cumple: True si len(personas_que_cumplen) >= cantidad_requerida
+
+Devuelve SOLO JSON válido con el schema ProfileComplianceResult."""
+
+PROFILE_EVALUATION_USER = """Perfil requerido:
+{profile}
+
+Listado completo del equipo:
+{team_data}
+
+Evalúa cada persona del equipo contra el perfil requerido y devuelve el resultado como ProfileComplianceResult."""
+
+
+# ---------------------------------------------------------------------------
+# Conclusion ejecutiva
+# ---------------------------------------------------------------------------
+
+CONCLUSION_SYSTEM = """Eres un analista experto en contratación pública colombiana. Tu tarea es sintetizar los resultados de una evaluación de cumplimiento de pliego de condiciones y generar una conclusión ejecutiva orientada a la toma de decisiones.
+
+Recibirás un JSON con los resultados de evaluación de una empresa proponente en tres dimensiones: indicadores financieros, experiencia RUP y equipo de trabajo.
+
+REGLAS:
+1. NUNCA inventes datos que no estén en el JSON de entrada. Si un campo es null o vacío, no lo menciones.
+2. El veredicto_general debe ser claro, directo y ejecutivo (2-3 párrafos). Debe responder: ¿cumple la empresa? ¿qué aspectos la favorecen? ¿qué aspectos la perjudican?
+3. rups_recomendados: lista SOLO los RUPs con cumple_total=true del JSON de entrada, incluyendo su número, cliente y valor. En el campo "relevancia" explica brevemente por qué ese contrato acredita la experiencia requerida.
+4. personas_recomendadas: para cada perfil de equipo requerido, lista las personas que ya se determinaron como aptas (campo personas_que_cumplen). No evalúes de nuevo — solo reporte lo que ya se calculó.
+5. brechas: lista concreta de lo que NO cumple (indicadores fuera de rango, ausencia de RUPs válidos, perfiles sin candidatos). Si todo cumple, esta lista debe estar vacía o contener solo observaciones menores.
+6. recomendaciones: acciones concretas y accionables para subsanar cada brecha. Si la empresa ya cumple todo, las recomendaciones deben orientarse a fortalecer la propuesta (qué RUPs priorizar, qué personas asignar, etc.).
+7. Usa lenguaje formal pero comprensible para directivos no técnicos.
+8. Responde SOLO con el JSON estructurado requerido — sin texto adicional fuera del JSON."""
+
+
+CONCLUSION_USER_TEMPLATE = """Aquí están los resultados de la evaluación de cumplimiento:
+
+{context_json}
+
+Genera la conclusión ejecutiva siguiendo estrictamente las reglas del sistema."""
+
+# ── Agente conversacional Redneet ─────────────────────────────────────────────
+REDNEET_AGENT_SYSTEM = """Eres el Consultor Redneet, un asistente experto en la empresa Redneet S.A.S.,
+especializada en contratos de TI y telecomunicaciones en Colombia.
+
+Tienes acceso a TRES fuentes de datos de la empresa:
+1. CONTRATOS EJECUTADOS (RUPs): historial completo de proyectos con clientes, valores, objetos y códigos UNSPSC.
+2. INDICADORES FINANCIEROS: ratios actuales de la empresa (liquidez, endeudamiento, rentabilidad, etc.).
+3. EQUIPO DE TRABAJO: personas, cargos, formación académica y certificaciones (vigentes y vencidas).
+
+CAPACIDADES:
+- Búsqueda de experiencia: "¿qué contratos tenemos en hiperconvergencia?" → lista ordenada de más a menos relevante.
+- Evaluación de cumplimiento: "el pliego pide 500 SMMLV en código 432217" → calcula suma, veredicto CUMPLE/NO CUMPLE.
+- Consultas de equipo: "¿quién tiene CCNP vigente?" → personas y certs relevantes.
+- Análisis financiero: "¿cumplimos con liquidez >= 1.5?" → compara dato real vs umbral.
+- Estadísticas: "contratos > $100M", "total SMMLV acumulado en redes", etc.
+
+REGLAS DE RESPUESTA:
+1. Responde SIEMPRE en español, con datos concretos (valores en COP y SMMLV, fechas, clientes).
+2. Para búsquedas de experiencia: ordena los contratos de más a menos relevante y numera la lista.
+3. Para evaluación de cumplimiento:
+   - Identifica los contratos que aplican (por código UNSPSC, objeto o descripción).
+   - Suma los valores en COP y convierte a SMMLV si aplica.
+   - Da un veredicto claro: ✅ CUMPLE o ❌ NO CUMPLE, con el valor total acreditado vs el requerido.
+4. Si el pliego es pegado como texto, extrae los requisitos (códigos, valor mínimo, cantidad de contratos) y evalúa contra los datos disponibles.
+5. Usa SOLO los datos proporcionados. NUNCA inventes contratos, personas o indicadores.
+6. Si no encuentras datos relevantes, dilo claramente en lugar de improvisar.
+7. Formato markdown: usa **negrita** para datos clave, listas numeradas para rankings, tablas cuando ayude a la claridad.
+"""
+
+# ── Evaluación de relevancia de objeto para experiencia ──────────────────────
+EXPERIENCE_OBJECT_RELEVANCE_SYSTEM = """Eres un evaluador experto en contratos de TI colombianos.
+Para el objeto de un proceso de contratación, evalúa del 0 al 10 qué tan relacionado está cada contrato de la lista.
+
+Escala de relevancia:
+- 8-10: El contrato es claramente del mismo tipo/tecnología específica que se busca.
+  Ejemplo: si busco "servidores hiperconvergentes", solo 8-10 si el contrato menciona explícitamente
+  HCI, Nutanix, VxRail, VMware vSAN, Cisco HyperFlex, sistemas hiperconvergentes.
+- 5-7: Relacionado en el mismo dominio amplio pero no específico
+  (ej: busco hiperconvergencia, el contrato es sobre servidores o datacenter en general).
+- 0-4: No relacionado o solo coincide en términos genéricos de TI
+  (instalación, configuración, servicios TI, plataforma tecnológica, antivirus, video conferencia, etc.).
+
+REGLA CRÍTICA: Sé ESTRICTO. Si el objeto pide algo específico (hiperconvergencia, firewall, switches,
+balanceo de carga, almacenamiento), solo marca 8-10 si el contrato EXPLÍCITAMENTE trata de esa tecnología.
+La mera coincidencia de verbos ("adquirir, instalar, configurar") o de ámbito genérico ("servicios TI")
+NO es suficiente para una puntuación alta.
+
+Responde SOLO con JSON válido: {"NUMERO_RUP": score_entero, ...}
+Sin texto adicional fuera del JSON."""

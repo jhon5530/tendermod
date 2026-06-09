@@ -41,9 +41,16 @@
                             {{ session.pdf_filename|default:"—" }}
                         </td>
                         <td>
-                            <span class="badge bg-{{ session.status_display_class }}">
-                                {{ session.get_status_display }}
-                            </span>
+                            {% if session.auto_flow_active %}
+                                <span class="badge bg-info">
+                                    <span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem;"></span>
+                                    En curso
+                                </span>
+                            {% else %}
+                                <span class="badge bg-{{ session.status_display_class }}">
+                                    {{ session.get_status_display }}
+                                </span>
+                            {% endif %}
                         </td>
                         <td class="text-center">
                             {% if session.result and session.result.cumple_experiencia is not None %}
@@ -81,7 +88,12 @@
                         <td class="text-muted small">{{ session.created_at|date:"d/m/Y H:i" }}</td>
                         <td class="text-center">
                             <div class="btn-group btn-group-sm">
-                                {% if session.status == 'ingesting_pdf' or session.status == 'created' or session.status == 'pdf_ready' %}
+                                {% if session.auto_flow_active %}
+                                    <a href="{% url 'analysis:analysis_auto' pk=session.pk %}"
+                                       class="btn btn-outline-info" title="Ver progreso">
+                                        <i class="bi bi-hourglass-split"></i>
+                                    </a>
+                                {% elif session.status == 'ingesting_pdf' or session.status == 'created' or session.status == 'pdf_ready' %}
                                     <a href="{% url 'analysis:step1' pk=session.pk %}"
                                        class="btn btn-outline-primary" title="Paso 1">
                                         <i class="bi bi-1-circle"></i>

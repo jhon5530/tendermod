@@ -7,7 +7,7 @@ def chunk_docs(docs):
     text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
     encoding_name='cl100k_base',                                                # Encoding used by popular LLMs
     chunk_size=512,                                                             # Each chunk will have up to 512 character
-    #chunk_overlap=50
+    chunk_overlap=50
     )
 
     document_chunks = text_splitter.split_documents(docs)

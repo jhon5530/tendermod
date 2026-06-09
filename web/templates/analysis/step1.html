@@ -178,6 +178,31 @@
                 </div>
                 <div id="spinner-general-req" class="ms-3 mb-3"></div>
 
+                <!-- Team profiles extraction -->
+                <div class="d-flex align-items-start gap-3 mb-3 p-3 bg-light rounded">
+                    <div class="flex-grow-1">
+                        <strong>Perfiles de Equipo de Trabajo</strong>
+                        <p class="text-muted small mb-0">
+                            Roles requeridos por el pliego: formacion academica, certificaciones, experiencia y disponibilidad.
+                        </p>
+                    </div>
+                    <div>
+                        {% if has_team_profiles %}
+                            <span class="badge bg-success me-2">
+                                <i class="bi bi-check me-1"></i>Extraido
+                            </span>
+                        {% endif %}
+                        <button class="btn btn-outline-primary btn-sm"
+                                id="btn-extract-team-profiles"
+                                onclick="doExtractTeamProfiles()"
+                                {% if session.status == 'ingesting_pdf' or session.status == 'created' %}disabled{% endif %}>
+                            <i class="bi bi-people me-1"></i>
+                            {% if has_team_profiles %}Re-extraer{% else %}Extraer perfiles{% endif %}
+                        </button>
+                    </div>
+                </div>
+                <div id="spinner-team-profiles" class="ms-3 mb-3"></div>
+
             </div>
         </div>
 
@@ -197,7 +222,7 @@
                 {% endif %}
             </div>
             <a href="{% url 'analysis:step2' pk=session.pk %}"
-               class="btn btn-primary btn-lg {% if not has_experience and not has_indicators %}disabled{% endif %}"
+               class="btn btn-primary btn-lg {% if not has_experience and not has_indicators and not has_general_requirements and not has_team_profiles %}disabled{% endif %}"
                id="btn-continue">
                 <i class="bi bi-arrow-right me-1"></i>Continuar al Paso 2
             </a>
@@ -225,10 +250,15 @@
                         <strong>Info general:</strong> Recupera el presupuesto oficial y datos
                         contextuales del proceso. Opcional pero recomendado.
                     </li>
-                    <li>
+                    <li class="mb-2">
                         <strong>Requisitos generales:</strong> Extrae todos los habilitantes
                         distintos de experiencia e indicadores: documentos juridicos, certificaciones,
                         polizas, personal minimo, etc. El usuario marca el cumplimiento en el Paso 2.
+                    </li>
+                    <li>
+                        <strong>Perfiles de equipo:</strong> Detecta los roles de personal requeridos
+                        (gerente, especialistas, etc.) con formacion, certificaciones y experiencia minima.
+                        Se evaluan automaticamente contra los datos del equipo en el Paso 2.
                     </li>
                 </ul>
             </div>
@@ -271,6 +301,7 @@ if ('{{ session.celery_task_id }}') {
             document.getElementById('btn-extract-indicators').disabled = false;
             document.getElementById('btn-extract-info').disabled = false;
             document.getElementById('btn-extract-general-req').disabled = false;
+            document.getElementById('btn-extract-team-profiles').disabled = false;
             document.getElementById('btn-extract-all').disabled = false;
             pdfReady = true;
             if (result && result.ocr_applied) {
@@ -340,11 +371,24 @@ function doExtractGeneralRequirements() {
     );
 }
 
+function doExtractTeamProfiles() {
+    launchExtraction(
+        SESSION_ID,
+        'team_profiles',
+        'spinner-team-profiles',
+        'Perfiles de equipo extraidos correctamente.',
+        function(result) {
+            document.getElementById('btn-extract-team-profiles').innerHTML =
+                '<i class="bi bi-people me-1"></i>Re-extraer';
+        }
+    );
+}
+
 function doExtractAll() {
     var btn = document.getElementById('btn-extract-all');
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Extrayendo...';
-    var pending = 4;
+    var pending = 5;
     function onDone() {
         pending--;
         if (pending === 0) {
@@ -356,13 +400,15 @@ function doExtractAll() {
     doExtractIndicators();
     doExtractGeneralInfo();
     doExtractGeneralRequirements();
-    // Restore button when all 4 spinners finish (poll via interval)
+    doExtractTeamProfiles();
+    // Restore button when all 5 spinners finish (poll via interval)
     var check = setInterval(function () {
         var spinners = [
             document.getElementById('spinner-experience'),
             document.getElementById('spinner-indicators'),
             document.getElementById('spinner-general-info'),
             document.getElementById('spinner-general-req'),
+            document.getElementById('spinner-team-profiles'),
         ];
         var allDone = spinners.every(function (s) {
             return s && !s.querySelector('.spinner-border');

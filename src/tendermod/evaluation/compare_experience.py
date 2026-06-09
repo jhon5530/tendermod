@@ -3,7 +3,7 @@
 
 import re
 import sqlite3
-from typing import Optional, Dict, Union, List
+from typing import Optional, Union, List
 from tendermod.evaluation.experience_inference import get_experience
 from tendermod.evaluation.schemas import (
     ExperienceResponse,
@@ -17,7 +17,74 @@ from tendermod.retrieval.embeddings import embed_docs
 from tendermod.retrieval.vectorstore import read_vectorstore
 from tendermod.evaluation.indicators_inference import get_general_info
 
-SMMLV_2026 = 1_423_500  # Salario Mínimo Mensual Legal Vigente 2026 en COP
+import datetime as _dt
+import logging as _logging
+
+_logger = _logging.getLogger(__name__)
+
+# Patrones que indican que `objeto` contiene meta-texto genérico en lugar del objeto real.
+# El LLM a veces extrae la REGLA de relación ("debe estar relacionado con el objeto del proceso")
+# en lugar del OBJETO REAL ("servicios de redes y telecomunicaciones").
+_GENERIC_OBJETO_PATTERNS = [
+    r"objeto del proceso",
+    r"proceso de selecci[oó]n",
+    r"objeto del contrato que se va a celebrar",
+    r"relacionado con el objeto",
+    r"misma actividad.*proceso",
+    r"mismo objeto del proceso",
+    r"objeto de selecci[oó]n",
+    r"deber[aá]\s+guardar\s+relaci[oó]n",
+    r"en\s+la\s+misma\s+l[ií]nea.*negocio.*proceso",
+    r"verificar\s+la\s+experiencia\s+debe",
+]
+
+
+def _is_generic_objeto(texto: str) -> bool:
+    """Retorna True si `objeto` es meta-texto genérico (no el objeto real del proceso)."""
+    if not texto or texto.strip() in ("None", ""):
+        return False
+    t = texto.lower()
+    return any(re.search(p, t) for p in _GENERIC_OBJETO_PATTERNS)
+
+
+def _extract_objeto_from_general_info(general_info_text: str) -> Optional[str]:
+    """
+    Extrae el objeto real del proceso desde el texto libre de general_info_text.
+    Busca patrones como 'Objeto: ...', 'Objeto del contrato: ...', etc.
+    Retorna None si no encuentra ningún patrón reconocible.
+    """
+    if not general_info_text:
+        return None
+    patterns = [
+        r"[Oo]bjeto\s+del\s+(?:contrato|proceso|presente\s+proceso|proceso\s+de\s+contrataci[oó]n)\s*[:：]\s*(.+?)(?:\n|$|Número|Presupuesto|N[uú]mero)",
+        r"[Oo]bjeto\s+a\s+contratar\s*[:：]\s*(.+?)(?:\n|$)",
+        r"[Oo]bjeto\s*[:：]\s*(.+?)(?:\n|$|Número|Presupuesto)",
+        r"El\s+objeto\s+(?:del|de\s+este|de\s+la\s+presente)\s+(?:contrato|proceso|licitaci[oó]n)\s+es\s*[:：]?\s*(.+?)(?:\.|$|\n)",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, general_info_text, re.IGNORECASE)
+        if m:
+            obj = m.group(1).strip().rstrip('.')
+            # Limpiar formato Markdown que el LLM puede incluir en general_info_text
+            obj = re.sub(r'\*+', '', obj).strip()
+            if len(obj) > 10:  # descartar matches triviales
+                return obj
+    return None
+
+# Actualizar este dict cada diciembre con el valor oficial del año siguiente (decreto del gobierno).
+_SMMLV_BY_YEAR: dict[int, float] = {
+    2024: 1_300_000,
+    2025: 1_423_500,
+    2026: 1_423_500,
+}
+
+def _get_smmlv() -> float:
+    """Retorna el SMMLV vigente para el año actual. Usa el último año conocido como fallback."""
+    year = _dt.date.today().year
+    if year in _SMMLV_BY_YEAR:
+        return _SMMLV_BY_YEAR[year]
+    # Fallback al año más reciente disponible
+    return _SMMLV_BY_YEAR[max(_SMMLV_BY_YEAR)]
 
 
 def _parse_presupuesto(texto: str) -> Optional[float]:
@@ -91,7 +158,7 @@ def parse_valor(valor_str: str, presupuesto_cop: Optional[float] = None) -> Opti
         elif ',' in raw:
             raw = raw.replace(',', '.')
         try:
-            return float(raw) * SMMLV_2026
+            return float(raw) * _get_smmlv()
         except ValueError:
             return None
 
@@ -297,42 +364,243 @@ def check_object_compliance(
     return any(score >= similarity_threshold for _, score in rup_results)
 
 
-def filter_rups_by_object(
+def _get_all_rups() -> list:
+    """Retorna todos los NUMERO RUP únicos presentes en SQLite."""
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        cur = conn.cursor()
+        cur.execute('SELECT DISTINCT "NUMERO RUP" FROM experiencia ORDER BY "NUMERO RUP"')
+        rows = cur.fetchall()
+    out = []
+    for (v,) in rows:
+        try:
+            out.append(int(v))
+        except (TypeError, ValueError):
+            out.append(v)
+    return out
+
+
+def _check_experience_semantic_only(
+    tender_experience: ExperienceResponse,
+    similarity_threshold: float = 0.75,
+) -> ExperienceComplianceResult:
+    """
+    Evalúa experiencia usando SOLO similitud semántica cuando no hay códigos UNSPSC.
+    Usa todos los RUPs de la BD como pool de candidatos y aplica el filtro de objeto
+    como excluyente (objeto_exige_relevancia=SI implícito).
+    """
+    todos_rups = _get_all_rups()
+    if not todos_rups:
+        _logger.warning("[_check_experience_semantic_only] No hay RUPs en SQLite.")
+        return ExperienceComplianceResult(codigos_requeridos=[], cumple=False)
+
+    objeto = tender_experience.objeto
+    cantidad_n = parse_cantidad_contratos(getattr(tender_experience, 'cantidad_contratos', None))
+
+    _logger.info(
+        "[_check_experience_semantic_only] Pool: %d RUPs totales | objeto: '%s'",
+        len(todos_rups), (objeto or "")[:80],
+    )
+
+    # Filtro semántico excluyente sobre todos los RUPs
+    rups_semanticos, scores_objeto, objetos_objeto = filter_rups_by_object(
+        todos_rups, objeto, similarity_threshold
+    )
+    rups_excluidos = [r for r in todos_rups if r not in rups_semanticos]
+
+    # Top-N por valor sobre los que pasaron el filtro semántico
+    rups_top_n = select_top_n_rups(rups_semanticos, cantidad_n)
+
+    # Valor: parsear sin presupuesto (en quick evaluate no hay ChromaDB de licitación)
+    valor_cop = parse_valor(tender_experience.valor, presupuesto_cop=None)
+    cumple_valor_global = (
+        check_value_compliance(rups_top_n, valor_cop) if valor_cop is not None else None
+    )
+
+    rup_details = get_rup_details(rups_top_n)
+    total_valor_cop = sum(
+        d["valor_cop"] for d in rup_details.values() if d["valor_cop"] is not None
+    ) or None
+
+    rups_evaluados = []
+    for rup in rups_top_n:
+        detalles = rup_details.get(rup, {})
+        score_obj = scores_objeto.get(rup)
+        cumple_objeto = (score_obj >= similarity_threshold) if score_obj is not None else None
+        cumple_total = (
+            (cumple_valor_global if cumple_valor_global is not None else True)
+            and (cumple_objeto if cumple_objeto is not None else True)
+            and rup not in rups_excluidos
+        )
+        rups_evaluados.append(RupExperienceResult(
+            numero_rup=rup,
+            cliente=detalles.get("cliente"),
+            valor_cop=detalles.get("valor_cop"),
+            cumple_codigos=True,
+            cumple_valor=cumple_valor_global,
+            cumple_objeto=cumple_objeto,
+            score_objeto=score_obj,
+            objeto_contrato=objetos_objeto.get(rup),
+            cumple_total=cumple_total,
+        ))
+
+    # Top-10 excluidos para trazabilidad
+    excluidos_con_score = [
+        (r, scores_objeto.get(r)) for r in rups_excluidos
+    ]
+    excluidos_con_score.sort(key=lambda x: x[1] if x[1] is not None else -1.0, reverse=True)
+    excluidos_detalles = get_rup_details([r for r, _ in excluidos_con_score[:10]])
+    for rup, score_obj in excluidos_con_score[:10]:
+        detalles = excluidos_detalles.get(rup, {})
+        rups_evaluados.append(RupExperienceResult(
+            numero_rup=rup,
+            cliente=detalles.get("cliente"),
+            valor_cop=detalles.get("valor_cop"),
+            cumple_codigos=True,
+            cumple_valor=None,
+            cumple_objeto=False,
+            score_objeto=score_obj,
+            objeto_contrato=objetos_objeto.get(rup),
+            cumple_total=False,
+        ))
+
+    rups_cumplen = [r.numero_rup for r in rups_evaluados if r.cumple_total]
+
+    return ExperienceComplianceResult(
+        codigos_requeridos=[],
+        rups_candidatos_codigos=todos_rups,
+        cantidad_contratos_requerida=cantidad_n,
+        valor_requerido_cop=valor_cop,
+        objeto_requerido=objeto,
+        rups_evaluados=rups_evaluados,
+        rups_cumplen=rups_cumplen,
+        total_valor_cop=total_valor_cop,
+        rups_excluidos_por_objeto=rups_excluidos,
+        objeto_exige_relevancia="SI",
+        similarity_threshold_usado=similarity_threshold,
+        cumple=len(rups_cumplen) > 0,
+        modo_evaluacion="GLOBAL",
+    )
+
+
+def _fetch_rup_data_for_llm(rups: list) -> dict:
+    """Carga OBJETO y DESCRIPCION GENERAL de los RUPs del pool desde SQLite."""
+    if not rups:
+        return {}
+    placeholders = ",".join("?" * len(rups))
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f'SELECT "NUMERO RUP", OBJETO, "DESCRIPCION GENERAL" '
+            f'FROM experiencia WHERE "NUMERO RUP" IN ({placeholders})',
+            [str(r) for r in rups],
+        ).fetchall()
+    return {
+        row["NUMERO RUP"]: {
+            "objeto": (row["OBJETO"] or "").strip(),
+            "descripcion": (row["DESCRIPCION GENERAL"] or "").strip(),
+        }
+        for row in rows
+    }
+
+
+def _filter_rups_by_object_llm(
+    rups: list,
+    objeto_requerido: str,
+) -> tuple:
+    """
+    Filtra el pool de RUPs usando un LLM como juez de relevancia de negocio.
+
+    Reemplaza la búsqueda vectorial (ChromaDB) que no distingue suficientemente
+    entre contratos con vocabulario similar pero tecnología diferente
+    (ej: "rack de servidores" vs "sistema hiperconvergente").
+
+    Threshold interno: score LLM >= 7/10 → cumple_objeto.
+    scores_por_rup devuelve valores normalizados /10 (0.0-1.0) para
+    compatibilidad con el display existente en RupExperienceResult.
+
+    Retorna misma firma que filter_rups_by_object_chromadb.
+    """
+    import json as _json
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain_openai import ChatOpenAI
+    from tendermod.evaluation.prompts import EXPERIENCE_OBJECT_RELEVANCE_SYSTEM
+
+    LLM_THRESHOLD = 7  # score >= 7/10 → aprobado
+
+    rup_data = _fetch_rup_data_for_llm(rups)
+    if not rup_data:
+        return rups, {}, {}
+
+    lines = [f"Objeto del proceso a evaluar:\n{objeto_requerido}\n\nContratos del proponente:"]
+    for rup in rups:
+        data = rup_data.get(rup, {})
+        obj = data.get("objeto", "")[:150]
+        desc = data.get("descripcion", "")[:60]
+        lines.append(f"RUP-{rup}: {obj} | Descripción: {desc}")
+    user_content = "\n".join(lines)
+
+    try:
+        llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0)
+        response = llm.invoke([
+            SystemMessage(content=EXPERIENCE_OBJECT_RELEVANCE_SYSTEM),
+            HumanMessage(content=user_content),
+        ])
+        raw = response.content.strip()
+        # Limpiar markdown fence si el LLM lo incluye
+        if raw.startswith("```"):
+            import re as _re
+            raw = _re.sub(r"^```[a-z]*\n?", "", raw)
+            raw = _re.sub(r"\n?```$", "", raw.strip())
+        scores_raw: dict = _json.loads(raw)
+    except Exception as exc:
+        _logger.error("[filter_rups_by_object_llm] LLM/parse error: %s", exc)
+        return None  # señal de fallback
+
+    # Normalizar claves del JSON: el LLM puede devolver "RUP-5", "5", o 5
+    scores_normalized: dict = {}
+    for key, val in scores_raw.items():
+        numeric_key = str(key).replace("RUP-", "").strip()
+        scores_normalized[numeric_key] = val
+
+    scores_por_rup: dict = {}
+    objetos_por_rup: dict = {}
+    rups_aprobados: list = []
+
+    for rup in rups:
+        raw_key = str(rup)
+        llm_score_raw = scores_normalized.get(raw_key)
+        try:
+            llm_score = int(llm_score_raw) if llm_score_raw is not None else None
+        except (TypeError, ValueError):
+            llm_score = None
+
+        if llm_score is None:
+            # RUP no puntuado → conservar (política conservadora)
+            _logger.warning("[filter_rups_by_object_llm] RUP %s no puntuado por LLM → conservado", rup)
+            rups_aprobados.append(rup)
+            scores_por_rup[rup] = None
+        else:
+            normalized = round(max(0.0, min(1.0, llm_score / 10)), 3)
+            scores_por_rup[rup] = normalized
+            objetos_por_rup[rup] = rup_data.get(rup, {}).get("objeto", "")
+            if llm_score >= LLM_THRESHOLD:
+                _logger.info("[filter_rups_by_object_llm] RUP %s: score=%d/10 (%.2f) ≥ %d → APROBADO", rup, llm_score, normalized, LLM_THRESHOLD)
+                rups_aprobados.append(rup)
+            else:
+                _logger.info("[filter_rups_by_object_llm] RUP %s: score=%d/10 (%.2f) < %d → EXCLUIDO", rup, llm_score, normalized, LLM_THRESHOLD)
+
+    _logger.info("[filter_rups_by_object_llm] objeto=%r | pool=%d | aprobados=%d | scores=%s",
+                 objeto_requerido[:60], len(rups), len(rups_aprobados),
+                 {k: v for k, v in scores_por_rup.items() if v is not None})
+    return rups_aprobados, scores_por_rup, objetos_por_rup
+
+
+def _filter_rups_by_object_chromadb(
     rups: list,
     objeto_requerido: str,
     similarity_threshold: float = 0.75,
 ) -> tuple:
-    """
-    Filtra semánticamente un pool de RUPs contra el objeto requerido en el pliego.
-
-    Evalúa todos los RUPs en una sola consulta a ChromaDB (Fase 2).
-    Usa k dinámico = max(20, len(rups) * 4) para garantizar cobertura del pool
-    aunque la colección sea grande.
-
-    Política de exclusión:
-    - RUP con score >= similarity_threshold → aprobado.
-    - RUP con score < similarity_threshold → excluido (se loguea).
-    - RUP sin registros en ChromaDB (sin datos) → conservado (comportamiento
-      conservador: la duda favorece al proponente, no al sistema).
-
-    Casos de cortocircuito — retorna (rups, {}) sin consultar ChromaDB:
-    - objeto_requerido vacío, "None" o coincide con frases de "no encontrado".
-    - Excepción al conectar con ChromaDB (log de advertencia crítica).
-
-    Retorna:
-        rups_aprobados (list): pool filtrado listo para check_value_compliance().
-        scores_por_rup (dict): {numero_rup: float|None} para trazabilidad en el
-            resultado final. None significa "sin datos en ChromaDB".
-    """
-    if not objeto_requerido or objeto_requerido.strip() in ("None", ""):
-        return rups, {}, {}
-    if re.search(
-        r'no specific purpose|cannot find|no se encontr|not found|no especif',
-        objeto_requerido,
-        re.IGNORECASE,
-    ):
-        return rups, {}, {}
-
+    """Implementación original con ChromaDB — usada como fallback del LLM."""
     try:
         vectorstore = read_vectorstore(
             embed_docs(),
@@ -341,24 +609,16 @@ def filter_rups_by_object(
         )
         try:
             total_docs = vectorstore._collection.count()
-            # Usar total_docs para garantizar que si un RUP tiene datos en ChromaDB,
-            # SIEMPRE aparecerá en results con su score real.
-            # Con k < total_docs, un RUP disímil puede no aparecer y recibir score=None,
-            # lo cual la política conservadora trata como "sin datos" → CUMPLE incorrectamente.
-            k_dinamico = total_docs if total_docs > 0 else max(20, len(rups) * 4)
+            k_dinamico = min(total_docs, max(200, len(rups) * 10)) if total_docs > 0 else max(20, len(rups) * 4)
         except Exception:
             k_dinamico = max(200, len(rups) * 10)
         results = vectorstore.similarity_search_with_relevance_scores(
             objeto_requerido, k=k_dinamico
         )
     except Exception as e:
-        print(
-            f"ADVERTENCIA CRITICA: No se pudo consultar ChromaDB de experiencia "
-            f"para el filtro de objeto. Se omite el filtro. Error: {e}"
-        )
+        _logger.warning("[filter_rups_chromadb] No se pudo consultar ChromaDB: %s", e)
         return rups, {}, {}
 
-    # Agrupar scores por numero_rup → tomar el máximo por contrato
     scores_por_rup: dict = {}
     objetos_por_rup: dict = {}
     for doc, score in results:
@@ -375,32 +635,54 @@ def filter_rups_by_object(
             objetos_por_rup[rup_key] = doc.page_content
 
     if not scores_por_rup:
-        print(
-            "ADVERTENCIA CRITICA: ChromaDB de experiencia no devolvió resultados "
-            "para el objeto requerido. Se omite el filtro de objeto."
-        )
+        _logger.warning("[filter_rups_chromadb] ChromaDB no devolvió resultados — se omite filtro de objeto")
         return rups, {}, {}
 
     rups_aprobados = []
     for rup in rups:
         score = scores_por_rup.get(rup)
         if score is None:
-            # Sin datos en ChromaDB para este RUP → conservar
-            print(
-                f"[filter_rups_by_object] RUP {rup}: sin datos en ChromaDB → conservado"
-            )
             rups_aprobados.append(rup)
         elif score >= similarity_threshold:
-            print(
-                f"[filter_rups_by_object] RUP {rup}: score={score:.3f} >= {similarity_threshold} → aprobado"
-            )
             rups_aprobados.append(rup)
-        else:
-            print(
-                f"[filter_rups_by_object] RUP {rup}: score={score:.3f} < {similarity_threshold} → EXCLUIDO por objeto"
-            )
 
     return rups_aprobados, scores_por_rup, objetos_por_rup
+
+
+def filter_rups_by_object(
+    rups: list,
+    objeto_requerido: str,
+    similarity_threshold: float = 0.75,
+) -> tuple:
+    """
+    Filtra un pool de RUPs por relevancia semántica con el objeto requerido.
+
+    Usa LLM (gpt-4.1-mini) como juez primario: evalúa 0-10 qué tan relacionado
+    está cada contrato del pool con el objeto del pliego. Solo pasan score >= 7.
+    Si el LLM falla, hace fallback a ChromaDB con similarity_threshold.
+
+    Retorna:
+        rups_aprobados (list): pool filtrado.
+        scores_por_rup (dict): {numero_rup: float 0.0-1.0} — score LLM normalizado /10 o ChromaDB.
+        objetos_por_rup (dict): {numero_rup: str} — texto del contrato para display.
+    """
+    if not objeto_requerido or objeto_requerido.strip() in ("None", ""):
+        return rups, {}, {}
+    if re.search(
+        r'no specific purpose|cannot find|no se encontr|not found|no especif',
+        objeto_requerido,
+        re.IGNORECASE,
+    ):
+        return rups, {}, {}
+
+    # Intento LLM primero
+    result = _filter_rups_by_object_llm(rups, objeto_requerido)
+    if result is not None:
+        return result
+
+    # Fallback ChromaDB
+    _logger.warning("[filter_rups_by_object] LLM falló → usando ChromaDB (threshold=%.2f)", similarity_threshold)
+    return _filter_rups_by_object_chromadb(rups, objeto_requerido, similarity_threshold)
 
 
 def _check_global_experience(
@@ -472,6 +754,15 @@ def _check_global_experience(
             re.IGNORECASE,
         )
     )
+
+    # Promover a SI cuando el objeto es largo y específico pero no marcado explícitamente.
+    # Un objeto descriptivo > 30 chars implica que la relevancia semántica importa.
+    if objeto_exige_relevancia == "NO_ESPECIFICADO" and objeto_definido and len(objeto.strip()) > 30:
+        objeto_exige_relevancia = "SI"
+        _logger.info(
+            "[_check_global_experience] objeto_exige_relevancia promovido a SI "
+            "(objeto explícito de %d chars).", len(objeto.strip())
+        )
 
     if objeto_exige_relevancia == "SI" and objeto_definido:
         # Filtro activo: aplicar semántico ANTES de top-N para no descartar
@@ -654,7 +945,7 @@ def check_multi_condition_experience(
         )
         try:
             total_docs = vectorstore._collection.count()
-            k_dinamico = total_docs if total_docs > 0 else max(20, len(rups_candidatos_codigos) * 4)
+            k_dinamico = min(total_docs, max(200, len(rups_candidatos_codigos) * 10)) if total_docs > 0 else max(20, len(rups_candidatos_codigos) * 4)
         except Exception:
             k_dinamico = max(200, len(rups_candidatos_codigos) * 10)
         print(f"[MULTI_CONDICION] ChromaDB abierto. k_dinamico={k_dinamico}")
@@ -791,6 +1082,18 @@ def check_compliance_experience(
     raw_codes = tender_experience.listado_codigos
 
     if not raw_codes:
+        # Sin códigos UNSPSC: intentar evaluación por similitud semántica del objeto
+        objeto = getattr(tender_experience, 'objeto', None)
+        if (objeto
+                and objeto.strip() not in ("None", "")
+                and not _is_generic_objeto(objeto)
+                and len(objeto.strip()) > 20):
+            _logger.warning(
+                "[check_compliance_experience] Sin códigos UNSPSC — fallback semántico "
+                "con todos los RUPs de la BD. objeto='%s'",
+                objeto[:80],
+            )
+            return _check_experience_semantic_only(tender_experience, similarity_threshold)
         print("ADVERTENCIA: No se encontraron códigos UNSPSC en los requisitos del pliego")
         return ExperienceComplianceResult(
             codigos_requeridos=[],
@@ -814,6 +1117,18 @@ def check_compliance_experience(
     print(f"RUPs que cumplen códigos: {rups_codigos} ({len(rups_codigos)} total)")
 
     if not rups_codigos:
+        # Sin candidatos por código: intentar fallback semántico si hay objeto definido
+        objeto = getattr(tender_experience, 'objeto', None)
+        if (objeto
+                and objeto.strip() not in ("None", "")
+                and not _is_generic_objeto(objeto)
+                and len(objeto.strip()) > 20):
+            _logger.warning(
+                "[check_compliance_experience] 0 RUPs con códigos UNSPSC '%s' — "
+                "fallback semántico con todos los RUPs. objeto='%s'",
+                codes, objeto[:80],
+            )
+            return _check_experience_semantic_only(tender_experience, similarity_threshold)
         return ExperienceComplianceResult(
             codigos_requeridos=codes,
             rups_candidatos_codigos=[],
@@ -828,7 +1143,7 @@ def check_compliance_experience(
         print(f"[check_compliance_experience] Modo MULTI_CONDICION detectado con {len(sub_requisitos)} sub-requisitos")
         return check_multi_condition_experience(tender_experience, rups_codigos, similarity_threshold)
     else:
-        print(f"[check_compliance_experience] Modo GLOBAL")
+        print("[check_compliance_experience] Modo GLOBAL")
         return _check_global_experience(tender_experience, similarity_threshold)
 
 

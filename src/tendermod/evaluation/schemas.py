@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Union, Optional, Literal, Annotated
+from typing import List, Union, Optional, Literal
 
 class ExperienceSubRequirement(BaseModel):
     """Un sub-requisito de experiencia especifica del pliego."""
@@ -149,6 +149,8 @@ class GeneralRequirement(BaseModel):
     nota: str = ""
     origen: Literal["EXTRACCION", "QA", "MANUAL"] = "EXTRACCION"
     extracto_pliego: str = ""
+    citation_verified: Optional[bool] = None  # True=cita confirmada en bloque fuente, False=no encontrada, None=no verificado
+    confidence: Optional[float] = None  # 0.0-1.0: heurística basada en sección+extracto+verificación
 
 
 class GeneralRequirementList(BaseModel):
@@ -226,6 +228,64 @@ class ExperienceComplianceResult(BaseModel):
     sub_requisitos_totales: int = Field(default=0, description="Cantidad total de sub-requisitos evaluados")
 
 
+class ProfileRequirement(BaseModel):
+    """Perfil de rol requerido extraído del pliego."""
+    rol: str = Field(description="Nombre del rol o cargo requerido (ej: GERENTE DE PROYECTO)")
+    cantidad: int = Field(default=1, description="Número de personas requeridas para este rol")
+    formacion_requerida: List[str] = Field(
+        default=[],
+        description="Títulos profesionales aceptables con lógica OR (ej: ['Ing. Sistemas', 'Telecomunicaciones', 'afines'])",
+    )
+    posgrado_requerido: List[str] = Field(
+        default=[],
+        description="Posgrados o certificaciones equivalentes con lógica OR (ej: ['Gerencia de Proyectos', 'PMP', 'ITIL'])",
+    )
+    certificaciones_requeridas: List[str] = Field(
+        default=[],
+        description="Certificaciones técnicas requeridas (ej: ['Cisco vigente', 'PMP vigente', 'ITIL'])",
+    )
+    anios_experiencia_min: Optional[int] = Field(default=None, description="Años mínimos de experiencia profesional")
+    contratos_min: Optional[int] = Field(default=None, description="Número mínimo de contratos en el rol")
+    descripcion_experiencia: str = Field(default="", description="Texto descriptivo del tipo de experiencia requerida")
+    disponibilidad: str = Field(default="", description="Requisito de disponibilidad (ej: 'parcial en sitio, 7x5')")
+    seccion: str = Field(default="N/A", description="Sección del pliego donde se define el perfil")
+    pagina: str = Field(default="N/A", description="Página aproximada del pliego")
+
+
+class ProfileRequirementList(BaseModel):
+    perfiles: List[ProfileRequirement] = []
+
+
+class PersonaProfileResult(BaseModel):
+    """Resultado de evaluar una persona contra un perfil de rol."""
+    persona: str
+    cargo: str
+    cumple: bool
+    justificacion: str = Field(description="Explicación detallada de por qué cumple o no cumple")
+    evidencia: List[str] = Field(
+        default=[],
+        description="Certificaciones/títulos concretos que satisfacen cada requisito (ej: 'PMP vigente satisface PMP requerido')",
+    )
+    gaps: List[str] = Field(
+        default=[],
+        description="Requisitos específicos que la persona no satisface",
+    )
+
+
+class ProfileComplianceResult(BaseModel):
+    """Resultado de evaluación de un rol completo."""
+    rol: str
+    cantidad_requerida: int
+    personas_evaluadas: List[PersonaProfileResult] = []
+    personas_que_cumplen: List[str] = Field(default=[], description="Nombres de personas que cumplen el perfil")
+    cumple: bool = Field(description="True si personas_que_cumplen >= cantidad_requerida")
+
+
+class TeamProfileComplianceList(BaseModel):
+    perfiles_evaluados: List[ProfileComplianceResult] = []
+    cumple_equipo: bool = Field(default=False, description="True si TODOS los perfiles requeridos tienen suficientes candidatos")
+
+
 class TeamQuery(BaseModel):
     """Intención parseada de una pregunta sobre el equipo de la empresa."""
     action: Literal["count", "list", "detail"] = Field(
@@ -260,3 +320,23 @@ class TeamQuery(BaseModel):
         default=None,
         description="Agrupar resultados por esta dimensión",
     )
+
+
+class RupRecomendado(BaseModel):
+    numero_rup: Union[int, str]
+    cliente: Optional[str] = None
+    valor_cop: Optional[float] = None
+    relevancia: str = ""
+
+
+class PersonaRecomendada(BaseModel):
+    rol: str
+    personas: List[str] = []
+
+
+class EvaluacionConclusionResult(BaseModel):
+    veredicto_general: str = Field(description="Texto narrativo ejecutivo de 2-3 párrafos con el veredicto global")
+    rups_recomendados: List[RupRecomendado] = Field(default=[], description="Contratos RUP que deben incluirse en la propuesta")
+    personas_recomendadas: List[PersonaRecomendada] = Field(default=[], description="Personas recomendadas por perfil requerido")
+    brechas: List[str] = Field(default=[], description="Brechas concretas detectadas (indicadores, experiencia, equipo)")
+    recomendaciones: List[str] = Field(default=[], description="Acciones concretas para subsanar brechas o fortalecer la propuesta")

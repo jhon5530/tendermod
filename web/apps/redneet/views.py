@@ -1,4 +1,3 @@
-import shutil
 import sqlite3
 import logging
 from pathlib import Path

@@ -2,11 +2,10 @@
 
 
 
-from chromadb.api.types import Document
 from tendermod.config.settings import CHROMA_EXPERIENCE_PERSIST_DIR
 from tendermod.ingestion.experience_db_loader import ingest_and_chunk
 from tendermod.retrieval.embeddings import embed_docs
-from tendermod.retrieval.vectorstore import create_vectorstor_from_text, create_vectorstore
+from tendermod.retrieval.vectorstore import create_vectorstor_from_text
 
 
 def ingest_experience_data():

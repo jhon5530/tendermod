@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Consultor Redneet{% endblock %}
+{% block nav_quick %}active{% endblock %}
+
+{% block content %}
+
+<div class="d-flex align-items-center gap-3 mb-4">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-database-check me-2 text-success"></i>Consultor Redneet</h2>
+        <p class="text-muted mb-0">
+            Pregunta en lenguaje natural sobre contratos, equipo e indicadores de la empresa.
+            Puedes buscar experiencias, evaluar requisitos de un pliego o consultar el estado financiero.
+        </p>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+
+        <!-- Input de pregunta -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header card-header-tendermod d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-chat-dots me-2"></i>Consultar al agente</h5>
+                <button class="btn btn-outline-secondary btn-sm" id="btn-clear-chat"
+                        title="Limpiar historial y empezar nueva conversacion">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>Nueva conversacion
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="input-group mb-2">
+                    <input type="text" id="redneet-question" class="form-control form-control-lg"
+                           placeholder="Ej: ¿Qué experiencia tenemos en hiperconvergencia?"
+                           onkeydown="if(event.key==='Enter') doAsk()">
+                    <button class="btn btn-success" id="btn-ask" onclick="doAsk()">
+                        <i class="bi bi-search me-1"></i>Consultar
+                    </button>
+                </div>
+
+                <!-- Spinner -->
+                <div id="qa-spinner" class="d-none text-center py-3">
+                    <div class="spinner-border text-success" role="status"></div>
+                    <p class="text-muted mt-2 small">El agente está consultando la base de datos Redneet...</p>
+                </div>
+
+                <!-- Sugerencias -->
+                <div id="suggestions" class="mt-3">
+                    <p class="text-muted small mb-2">Ejemplos de preguntas:</p>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-outline-secondary btn-sm suggestion-chip" onclick="useSuggestion(this)">
+                            ¿Qué experiencia tenemos en redes y datacenter?
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm suggestion-chip" onclick="useSuggestion(this)">
+                            ¿Cumplimos con liquidez mayor o igual a 1.5?
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm suggestion-chip" onclick="useSuggestion(this)">
+                            Lista contratos con valor mayor a $100 millones
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm suggestion-chip" onclick="useSuggestion(this)">
+                            ¿Quién tiene certificación CCNP o CCNA vigente?
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm suggestion-chip" onclick="useSuggestion(this)">
+                            Experiencia en hiperconvergencia y servidores
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm suggestion-chip" onclick="useSuggestion(this)">
+                            El pliego pide 500 SMMLV en código 432217. ¿Cumplimos?
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Historial de conversacion -->
+        <div id="chat-history"></div>
+
+    </div>
+
+    <!-- Panel lateral -->
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body">
+                <h6 class="card-title text-muted">
+                    <i class="bi bi-info-circle me-1"></i>¿Qué puedo preguntarle?
+                </h6>
+                <ul class="small text-muted mb-0">
+                    <li class="mb-1"><strong>Buscar experiencia</strong>: "¿Contratos de ciberseguridad?"</li>
+                    <li class="mb-1"><strong>Evaluar pliego</strong>: "El pliego pide 300 SMMLV en código 432225..."</li>
+                    <li class="mb-1"><strong>Equipo</strong>: "¿Quién tiene CCNP vigente?"</li>
+                    <li class="mb-1"><strong>Financiero</strong>: "¿Liquidez actual vs umbral 1.5?"</li>
+                    <li><strong>Estadísticas</strong>: "Total SMMLV en contratos de redes"</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h6 class="card-title text-muted">
+                    <i class="bi bi-database me-1"></i>Datos disponibles
+                </h6>
+                <div id="redneet-db-status" class="small text-muted">
+                    <div class="spinner-border spinner-border-sm me-1" role="status"></div>
+                    Consultando...
+                </div>
+                <div class="mt-2">
+                    <a href="{% url 'redneet:dashboard' %}" class="btn btn-outline-success btn-sm">
+                        <i class="bi bi-upload me-1"></i>Actualizar datos
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% csrf_token %}
+{% endblock %}
+
+{% block extra_js %}
+<!-- marked.js para renderizar markdown en las respuestas -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+{{ chat_history|json_script:"redneet-chat-history-data" }}
+<script>
+var QUERY_URL = "{% url 'analysis:redneet_qa_query' %}";
+var CLEAR_URL  = "{% url 'analysis:redneet_qa_clear' %}";
+var DB_STATUS_URL = "/api/db-status/";
+
+var INITIAL_HISTORY = JSON.parse(document.getElementById('redneet-chat-history-data').textContent);
+
+// Configurar marked para un renderizado seguro
+marked.setOptions({ breaks: true, gfm: true });
+
+function getCsrfToken() {
+    var el = document.querySelector('[name=csrfmiddlewaretoken]');
+    return el ? el.value : '';
+}
+
+function useSuggestion(btn) {
+    document.getElementById('redneet-question').value = btn.textContent.trim();
+    doAsk();
+}
+
+document.getElementById('btn-clear-chat').addEventListener('click', function() {
+    fetch(CLEAR_URL, {
+        method: 'POST',
+        headers: {'X-CSRFToken': getCsrfToken()},
+    }).then(function() {
+        document.getElementById('chat-history').innerHTML = '';
+        document.getElementById('suggestions').classList.remove('d-none');
+    });
+});
+
+function doAsk() {
+    var input = document.getElementById('redneet-question');
+    var question = input.value.trim();
+    if (!question) return;
+
+    var btn = document.getElementById('btn-ask');
+    btn.disabled = true;
+    input.disabled = true;
+    document.getElementById('qa-spinner').classList.remove('d-none');
+    document.getElementById('suggestions').classList.add('d-none');
+
+    fetch(QUERY_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCsrfToken(),
+        },
+        body: JSON.stringify({ question: question }),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        appendMessage(question, data.answer || data.error || 'Sin respuesta.', !!data.error);
+        input.value = '';
+    })
+    .catch(function(err) {
+        appendMessage(question, 'Error de conexion: ' + err, true);
+    })
+    .finally(function() {
+        btn.disabled = false;
+        input.disabled = false;
+        document.getElementById('qa-spinner').classList.add('d-none');
+        input.focus();
+    });
+}
+
+function appendMessage(question, answer, isError) {
+    var history = document.getElementById('chat-history');
+
+    var card = document.createElement('div');
+    card.className = 'card border-0 shadow-sm mb-3';
+
+    var body = document.createElement('div');
+    body.className = 'card-body';
+
+    var q = document.createElement('p');
+    q.className = 'fw-semibold mb-2 text-dark';
+    q.innerHTML = '<i class="bi bi-question-circle me-1 text-success"></i>' + escapeHtml(question);
+
+    var a = document.createElement('div');
+    if (isError) {
+        a.className = 'alert alert-danger mb-0 small';
+        a.textContent = answer;
+    } else {
+        a.className = 'redneet-answer small';
+        // Renderizar markdown — la respuesta del agente usa formato markdown
+        a.innerHTML = marked.parse(answer);
+    }
+
+    body.appendChild(q);
+    body.appendChild(a);
+    card.appendChild(body);
+
+    history.insertBefore(card, history.firstChild);
+}
+
+function escapeHtml(text) {
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(text));
+    return d.innerHTML;
+}
+
+// Hidratar historial previo desde sesión Django
+(function() {
+    var pairs = [];
+    for (var i = 0; i < INITIAL_HISTORY.length; i += 2) {
+        var u = INITIAL_HISTORY[i], a = INITIAL_HISTORY[i + 1];
+        if (u && a) pairs.push([u.content, a.content]);
+    }
+    for (var j = pairs.length - 1; j >= 0; j--) {
+        appendMessage(pairs[j][0], pairs[j][1], false);
+    }
+    if (pairs.length > 0) {
+        document.getElementById('suggestions').classList.add('d-none');
+    }
+})();
+
+// Estado de datos Redneet
+fetch(DB_STATUS_URL)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        var el = document.getElementById('redneet-db-status');
+        var personas = data.personas || 0;
+        var certs = data.certificaciones || 0;
+        var exp = data.experiencia || '?';
+        var ind = data.indicadores || '?';
+        if (personas === 0 && certs === 0) {
+            el.innerHTML = '<span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Sin datos. Cargue el Excel primero.</span>';
+        } else {
+            el.innerHTML =
+                '<i class="bi bi-check-circle-fill text-success me-1"></i>' +
+                '<strong>' + exp + '</strong> contratos &nbsp;·&nbsp; ' +
+                '<strong>' + personas + '</strong> personas &nbsp;·&nbsp; ' +
+                '<strong>' + certs + '</strong> certs &nbsp;·&nbsp; ' +
+                '<strong>' + ind + '</strong> indicadores';
+        }
+    })
+    .catch(function() {
+        document.getElementById('redneet-db-status').textContent = 'No se pudo consultar el estado.';
+    });
+</script>
+
+<style>
+.redneet-answer h1, .redneet-answer h2, .redneet-answer h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-top: 0.75rem;
+}
+.redneet-answer ul, .redneet-answer ol {
+    padding-left: 1.2rem;
+    margin-bottom: 0.5rem;
+}
+.redneet-answer p { margin-bottom: 0.4rem; }
+.redneet-answer table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin-bottom: 0.75rem;
+}
+.redneet-answer th, .redneet-answer td {
+    border: 1px solid #dee2e6;
+    padding: 4px 8px;
+}
+.redneet-answer th { background: #f8f9fa; font-weight: 600; }
+</style>
+{% endblock %}
